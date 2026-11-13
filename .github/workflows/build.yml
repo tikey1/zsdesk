@@ -98,7 +98,6 @@ jobs:
         shell: pwsh
         run: |
           $candidates = @(
-            (Join-Path $env:ProgramFiles 'LLVM\bin\clang-cl.exe'),
             'C:\Program Files\LLVM\bin\clang-cl.exe',
             'C:\Program Files (x86)\LLVM\bin\clang-cl.exe'
           )
@@ -139,11 +138,25 @@ jobs:
           }
           Write-Host "ninja installed: $((Get-Command ninja).Source)"
 
+      # 上游脚本的 $needsConfigure = -not (Test-Path CMakeCache.txt)：
+      # 一旦 clang-cl-build/ 里有旧的 CMakeCache.txt 就会跳过 configure，
+      # 编出旧配置的产物。CI 每次全新 checkout 不会命中，但必须显式清干净。
+      - name: Clean the build directory
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build'
+          if (Test-Path -LiteralPath $dir) {
+            Remove-Item -LiteralPath $dir -Recurse -Force
+            Write-Host "removed stale build dir: $dir"
+          } else {
+            Write-Host 'no stale build dir'
+          }
+
       # core-ui 的 CMakeLists 用 FetchContent 从 GitHub 现场拉 QuickJS-NG：
       #   FetchContent_Declare(quickjs GIT_REPOSITORY https://github.com/quickjs-ng/quickjs.git
       #                         GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
       # 这里预置该源码到 FetchContent 的默认落点 _deps/quickjs-src，
-      # 让 configure 直接复用、不再联网 —— 消除 CI 上的浅克隆 tag / 子模块 / 认证挂死风险。
+      # 让 configure 直接复用、不再联网 —— 消除浅克隆 tag / 子模块 / 认证挂死风险。
       # 预置失败不阻断：让上游脚本自己走 FetchContent 下载路径。
       - name: Pre-fetch QuickJS-NG into the FetchContent slot
         shell: pwsh
@@ -161,8 +174,32 @@ jobs:
       - name: Build core-ui from source
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\core-ui\scripts\build-clang-cl.ps1" -Target core-ui -ClangClPath "${{ steps.toolchain.outputs.path }}"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $log = Join-Path $env:RUNNER_TEMP 'core-ui-build.log'
+          $script = Join-Path $env:GITHUB_WORKSPACE 'core-ui\scripts\build-clang-cl.ps1'
+          $failed = $false
+          try {
+            & $script -Target core-ui -ClangClPath "${{ steps.toolchain.outputs.path }}" *>&1 | Tee-Object -FilePath $log
+          } catch {
+            $_ | Out-String | Tee-Object -FilePath $log -Append | Write-Host
+            $failed = $true
+          }
+          # 日志尾部同时写进 step summary，网页上直接可见，不必展开日志
+          if (Test-Path -LiteralPath $log) {
+            $tail = Get-Content -LiteralPath $log -Tail 60 -ErrorAction SilentlyContinue
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## core-ui 构建日志（末尾 60 行）`n`n```" -Encoding utf8
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value ($tail -join "`n") -Encoding utf8
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "```" -Encoding utf8
+          }
+          if ($failed) { throw 'core-ui build failed — see the log artifact' }
+
+      # 日志无论成败都上传（run 级日志 API 需要 admin 权限，外部无法直接取）
+      - name: Upload the core-ui build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-ui-build-log
+          path: ${{ runner.temp }}/core-ui-build.log
+          if-no-files-found: warn
 
       - name: Verify core-ui.dll is a Windows x86-64 image
         shell: pwsh
@@ -181,6 +218,25 @@ jobs:
             throw ("core-ui.dll is not x86-64 (Machine=0x{0:X4}, expected 0x8664)" -f $machine)
           }
           Write-Host ("core-ui.dll OK: {0} bytes, Machine=0x8664" -f (Get-Item -LiteralPath $dll).Length)
+
+      # 门禁 G2：产物版本必须与钉住的 revision 对应（core-ui/VERSION ↔ DLL 版本资源）
+      - name: Gate G2 — the DLL version must match the pinned revision
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\core-ui.dll'
+          $expected = (Get-Content -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'core-ui\VERSION') -Raw).Trim()
+          $actual = (Get-Item -LiteralPath $dll).VersionInfo.FileVersion
+          if (-not $actual) { throw 'core-ui.dll carries no FileVersion resource' }
+          $actual = $actual.Trim()
+          Write-Host "expected VERSION : $expected"
+          Write-Host "actual FileVersion: $actual"
+          if ($actual -ne $expected) {
+            throw "core-ui.dll version mismatch: built $actual but the pinned revision declares $expected"
+          }
+          # 写 revision 戳记，随包分发，供运行时自证「手边这份就是 CI 构建的那份」
+          $stamp = "$expected`n${{ steps.dependency.outputs.revision }}"
+          Set-Content -LiteralPath "$dll.revision" -Value $stamp -Encoding utf8
+          Write-Host "wrote $dll.revision"
 
       # 门禁 S7：机器判定 CRT 必须是动态（/MD）—— 必须出现 MSVCP140.dll 与 VCRUNTIME140.dll
       - name: Gate S7 — core-ui.dll must link the dynamic VC++ runtime
@@ -207,7 +263,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: core-ui-x64
-          path: core-ui/clang-cl-build/core-ui.dll
+          path: |
+            core-ui/clang-cl-build/core-ui.dll
+            core-ui/clang-cl-build/core-ui.dll.revision
           if-no-files-found: error
 
   # ==================================================================
@@ -279,6 +337,21 @@ jobs:
 
           Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe') -Destination (Join-Path $stage 'ZSDesk.exe')
           Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll')       -Destination (Join-Path $stage 'core-ui.dll')
+          if (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll.revision')) {
+            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll.revision') -Destination (Join-Path $stage 'core-ui.dll.revision')
+          }
+
+          # assets/ 必须进包：core-ui 没有运行时替换 CSS 变量的 C API，
+          # Rust 必须在加载前把 :root 拼进 .uix 源码 → 用 ui_page_load_string → 运行时读文件。
+          # 缺了 assets/，交付的 exe 启动即失败。
+          $assets = Join-Path $env:GITHUB_WORKSPACE 'app\assets'
+          if (-not (Test-Path -LiteralPath $assets)) { throw "assets directory not found at $assets" }
+          Copy-Item -LiteralPath $assets -Destination (Join-Path $stage 'assets') -Recurse
+          foreach ($required in 'main.uix','preview.uix','about.uix','themes.json') {
+            $f = Join-Path $stage "assets\$required"
+            if (-not (Test-Path -LiteralPath $f)) { throw "assets/$required is missing from the package" }
+          }
+          Write-Host 'assets/ packaged and verified.'
 
           $crtDir = '${{ steps.crt.outputs.dir }}'
           foreach ($dll in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') {
@@ -294,6 +367,15 @@ jobs:
             Copy-Item -Path 'app/packaging/licenses/*.txt' -Destination (Join-Path $stage 'licenses') -ErrorAction SilentlyContinue
           }
 
+          # 已知风险：exe 同目录的 msvcp140.dll 会优先于系统目录，可能覆盖用户更新的版本 → 记版本号
+          $note = @(
+            '本包内附的 MSVC v14 运行库（msvcp140.dll / vcruntime140.dll / vcruntime140_1.dll）',
+            '来自 Visual C++ x64 Redistributable，随包分发以实现「解压即用」。',
+            '同目录的运行库会优先于系统目录；若遇到运行库相关的异常，请安装最新的 VC++ x64 运行库。',
+            '各 DLL 的文件版本见 manifest.sha256 末列。'
+          )
+          Set-Content -LiteralPath (Join-Path $stage '说明.txt') -Value $note -Encoding utf8
+
           # 逐文件 bytes + SHA-256 manifest（沿用上游 package.ps1 的清单口径）
           $manifest = Join-Path $stage 'manifest.sha256'
           $lines = New-Object System.Collections.Generic.List[string]
@@ -301,7 +383,8 @@ jobs:
             if ($f.FullName -eq $manifest) { continue }
             $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             $rel  = $f.FullName.Substring($stage.Length + 1).Replace('\','/')
-            $lines.Add("$hash  $rel  $($f.Length)")
+            $ver  = $f.VersionInfo.FileVersion
+            $lines.Add("$hash  $rel  $($f.Length)  $ver")
           }
           Set-Content -LiteralPath $manifest -Value $lines -Encoding utf8
 
