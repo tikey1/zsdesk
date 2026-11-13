@@ -378,6 +378,50 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 
 ---
 
+## D15 `.uix` 通道与深浅色的五条契约口径（架构师 FFI v3 §9.4，已定；QA 独立结论同向）
+
+| 契约 | 口径 | 依据 |
+|---|---|---|
+| **F1 `:root` 注入** | 拼进 `.uix` 源码里**已有的 `<style>` 块内部**（该块最后一行 `</style>` 之前）；`:root` 内**只允许 `--app-*` 变量声明**，不得写 `background`/`color`/`font` | QA 的 B1 与架构师独立核实同向：`sfc_parser.cpp:260-266` 顶层非 `<` 内容 → `doc.ok=false`；`cascade.cpp:125` 明确 `:root` 只收 CSS 变量 |
+| **F2 深浅色** | 与 F1 同因：`--app-*` **不随** `ui_theme_set_mode` 变化 → 切主题**必须重建页面**并重新注入目标主题的那一套 `:root` 值 | `page_state.cpp:688-702` 的 `RefreshThemeStyles` 只重写库的 34 个键、不重新采集 `:root` |
+| **F3 句柄** | 重建页面后，27 个 `ui_widget_find_by_id` 句柄**全部失效** → 必须重新绑定；旧 page 必须销毁 | 架构师 FFI v3 §9.4 |
+| **F4 字体** | 字体是**库 token**，不在 `--app-*` 内 → 切主题**不**触发重建 | 架构师 FFI v3 §9.4 |
+| **F5 accent** | `ui_theme_set_accent_hex` **不随** `ui_theme_set_mode` 保留生效 → 切主题时必须**重读系统 AccentColor 并重调**（与 D14 的读注册表路径一致） | 架构师 FFI v3 §9.4；修正了前端此前「跨模式保留」的表述（保留的是同一个值，但不会自动重新应用） |
+
+**三个 Rust 侧 P0（UNVERIFIED，禁止编造签名）**——需在 M1 第一步用真机最小探针逐项验：
+1. `ui_page_load_string` 的所有权约定（返回的 page / 字符串是否需要调用方释放）
+2. `ui_page_set_json` 的所有权与线程约束
+3. `ui_custom()` 的精确签名（`ui_custom()` + `ui_widget_add_child()` 挂载方案的落点）
+
+**落地顺序（M1 开工即用）**：读系统 AccentColor（失败取 `--app-accent`）→ `ui_theme_set_default_font` → `ui_theme_set_cjk_font` → `ui_theme_set_mode` → `ui_theme_set_accent_hex` → 拼 `:root` 进 `<style>` 块内 → `ui_page_load_string` → 重新绑定全部句柄。
+
+---
+
+## D16 戳记口径与 S13 门禁口径（QA 契约核对后的裁决，2026-11-13）
+
+### 戳记：三方口径统一为「单行 SHA」
+| 来源 | 原口径 | 问题 |
+|---|---|---|
+| `spec/ffi-core-ui.md` §5.5 | 甲：Rust `build.rs` 编译期固化 `EXPECTED_REVISION`（**SHA**），运行时比对 | 权威口径 |
+| `spec/ci-contract.md` §3.3 | 未定 | 缺口 |
+| `build.yml`（原实现） | 乙：CI 写戳记，内容 = **VERSION + 换行 + SHA**（两行） | **与 §5.5 不一致 → 运行时 `EXPECTED_REVISION`（SHA）必然对不上戳记首行 → 自证机制失效** |
+
+**裁决**
+- 戳记内容 = `packaging/core-ui-revision.txt` 的**单行 SHA**（不带 VERSION、不带换行）。
+- **M0 过渡**：由 CI 代写（Rust 绑定层尚未落地），但 CI 必须**机器断言「包内戳记 == `packaging/core-ui-revision.txt`」**，断言不过即 fail。
+- **M1 落地**：改为 Rust `build.rs` 编译期写，CI 只做校验（不再代写）。
+
+### S13 门禁：改成两条**可机械判死**的规则
+- QA 发现契约 §4.4 写「禁自定义 `--app-accent`」，但 `assets/themes.json` **确实定义了** `--app-accent` 作源值 → 按契约字面实现门禁会 FAIL。
+**裁决（与 D14 一致）**
+1. **禁止自定义与库 34 个 token 同名的属性**（真正要防的：`RebuildThemeVars` 会 wipe 同名用户值）；
+2. `--app-accent` **允许存在**（它只是回退源值），但**断言它不得出现在任何 `.uix` 的 `var()` 引用里** —— `.uix` 里一律读库 token `var(--accent)`，保证库自绘控件与自绘区域同色。
+
+### 其余「当前态」落后项
+由架构师同步 `spec/ci-contract.md` 的「当前态」栏：CI 布局 / `FETCHCONTENT_SOURCE_DIR_QUICKJS` / 预置目录 / `msvc-dev-cmd` / `::error::` 诊断 / `:root` 注入位置 / S7 dumpbin 门禁 / 戳记口径 / S13 门禁。`build.yml` 里的旧方案遗留注释已由交付总监清理。
+
+---
+
 ## 技术后果汇总（D01–D05 组合后必须一并解决）
 
 | # | 后果 | 归属 | 状态 |

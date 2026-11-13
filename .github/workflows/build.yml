@@ -160,12 +160,6 @@ jobs:
           }
 
       # core-ui 的 CMakeLists 用 FetchContent 从 GitHub 现场拉 QuickJS-NG：
-      #   FetchContent_Declare(quickjs GIT_REPOSITORY https://github.com/quickjs-ng/quickjs.git
-      #                         GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
-      # 这里预置该源码到 FetchContent 的默认落点 _deps/quickjs-src，
-      # 让 configure 直接复用、不再联网 —— 消除浅克隆 tag / 子模块 / 认证挂死风险。
-      # 预置失败不阻断：让上游脚本自己走 FetchContent 下载路径。
-      # core-ui 的 CMakeLists 用 FetchContent 从 GitHub 现场拉 QuickJS-NG：
       #   FetchContent_Declare(quickjs GIT_REPOSITORY .../quickjs.git GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
       #
       # 注意：把源码预置到 _deps/quickjs-src **无效** —— FetchContent 是否需要下载，
@@ -303,10 +297,13 @@ jobs:
           if ($actual -ne $expected) {
             throw "core-ui.dll version mismatch: built $actual but the pinned revision declares $expected"
           }
-          # 写 revision 戳记，随包分发，供运行时自证「手边这份就是 CI 构建的那份」
-          $stamp = "$expected`n${{ steps.dependency.outputs.revision }}"
-          Set-Content -LiteralPath "$dll.revision" -Value $stamp -Encoding utf8
-          Write-Host "wrote $dll.revision"
+          # 写 revision 戳记，随包分发，供运行时自证「手边这份就是 CI 构建的那份」。
+          # 内容 = packaging/core-ui-revision.txt 的【单行 SHA】—— 与 spec/ffi-core-ui.md §5.5
+          # 「甲：Rust build.rs 编译期固化 EXPECTED_REVISION」同一口径，运行时可直接比对。
+          # M0 阶段 Rust 绑定层尚未落地，先由 CI 代写；M1 移交 Rust build.rs 后本步骤改为只校验。
+          $revision = "${{ steps.dependency.outputs.revision }}"
+          Set-Content -LiteralPath "$dll.revision" -Value $revision -Encoding ascii -NoNewline
+          Write-Host "wrote $dll.revision -> $revision"
 
       # 门禁 S7：机器判定 CRT 必须是动态（/MD）—— 必须出现 MSVCP140.dll 与 VCRUNTIME140.dll
       - name: Gate S7 — core-ui.dll must link the dynamic VC++ runtime
@@ -407,13 +404,23 @@ jobs:
 
           Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe') -Destination (Join-Path $stage 'ZSDesk.exe')
           Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll')       -Destination (Join-Path $stage 'core-ui.dll')
-          if (Test-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll.revision')) {
-            Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll.revision') -Destination (Join-Path $stage 'core-ui.dll.revision')
+          # 戳记必须与 packaging/core-ui-revision.txt 完全一致 —— 运行时靠它自证
+          # 「手边这份 core-ui.dll 就是 CI 从钉住的 revision 构建的那份」
+          $stampSrc = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll.revision'
+          if (-not (Test-Path -LiteralPath $stampSrc)) { throw "core-ui.dll.revision missing at $stampSrc" }
+          Copy-Item -LiteralPath $stampSrc -Destination (Join-Path $stage 'core-ui.dll.revision')
+          $expectedRevision = (Get-Content -LiteralPath 'app/packaging/core-ui-revision.txt' -Raw).Trim()
+          $stampValue = (Get-Content -LiteralPath (Join-Path $stage 'core-ui.dll.revision') -Raw).Trim()
+          if ($stampValue -ne $expectedRevision) {
+            throw "revision stamp mismatch: package carries '$stampValue' but packaging/core-ui-revision.txt says '$expectedRevision'"
           }
+          Write-Host "revision stamp verified: $stampValue"
 
           # assets/ 必须进包：core-ui 没有运行时替换 CSS 变量的 C API，
           # Rust 必须在加载前把 :root 拼进 .uix 源码 → 用 ui_page_load_string → 运行时读文件。
           # 缺了 assets/，交付的 exe 启动即失败。
+          # 且 :root 必须【拼进 <style> 块内部】（该块最后一行 </style> 之前）——
+          # 拼在源码顶层会被 sfc_parser.cpp 判为 'unexpected content at top level' → 整页不加载。
           $assets = Join-Path $env:GITHUB_WORKSPACE 'app\assets'
           if (-not (Test-Path -LiteralPath $assets)) { throw "assets directory not found at $assets" }
           Copy-Item -LiteralPath $assets -Destination (Join-Path $stage 'assets') -Recurse

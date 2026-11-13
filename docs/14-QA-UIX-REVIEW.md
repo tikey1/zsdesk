@@ -704,3 +704,102 @@ PASS —— 真实文字元素的对比度全部 ≥ 4.5:1，间距取值全部�
 结论方向不变（都偏灰、都比 `--app-text` 浅一档），但数字要改。
 
 ---
+
+## 9. CI 契约一致性核对（`spec/ci-contract.md` v3 vs `.github/workflows/build.yml`）
+
+> **范围**：只核对「结果是否符合契约」，**不审实现写法**，**不改 `build.yml`**（交付总监所有）。
+> **方法**：逐行读 `build.yml`（452 行）与契约 v3 的「当前态」栏 + §3 判定表 + §5 诊断段，逐条比对。
+> **边界**：本次只做**静态核对**；CI 是否已实跑通过**未能核实**（需 CI run 自证）。
+
+### 9.1 结论
+
+> **契约的「目标态」全部成立**（构建结果约束：x64 / `/MD` / 版本匹配 / 导出面 / 同目录 / assets 进包）——
+> §5.1 的绕法（直接调 cmake + `-DFETCHCONTENT_SOURCE_DIR_QUICKJS` + `ilammy/msvc-dev-cmd@v1`）**已按 §5.4 的参数清单落地**。
+> **但契约的「当前态」栏落后于 `build.yml` 共 8 处**，其中 **1 处是实质冲突（revision 戳记：三方口径不一致）**、
+> **1 处是规则与现行资产直接对撞（S13 禁 `--app-accent`）**。这两条必须裁决，其余 6 条是文档同步。
+
+### 9.2 「当前态」栏与 `build.yml` 的 8 处出入
+
+| # | 契约位置 | 契约「当前态」写的 | `build.yml` 实际 | 判定 | 建议 |
+|---|---|---|---|---|---|
+| **C-1** | 头部第 5 行 | 「**当前 402 行** / 3 个 job」 | **452 行** / 3 个 job | 🟡 过期 | 行数改 452（job 数 3 ✓） |
+| **C-2** | §2 快照第 52 行 | 「Pre-fetch QuickJS-NG into the FetchContent slot ← 预置 **`_deps/quickjs-src`**」 | 预置到 **`$RUNNER_TEMP\quickjs`**（`build.yml:184-185`），**在 `clang-cl-build/` 之外**（符合 §5.4 要点 3），经 **`-DFETCHCONTENT_SOURCE_DIR_QUICKJS`** 消费（`build.yml:215`） | 🟡 过期 | 当前态改成新路径 + 官方变量 |
+| **C-3** | §3.2 第 12 行 | 「`git clone --depth 1 --branch v0.14.0 **--recurse-submodules**` → `_deps/quickjs-src`」，判定「✅ 这是第 12 步失败的加固」 | **`--recurse-submodules` 已去掉**（`build.yml:185`）→ H2 已落地 | 🟡 过期 | 删掉 `--recurse-submodules`；判定改为「🟡 机制已换、**尚未实跑自证**」 |
+| **C-4** | §3.2 第 9 行 | 「已实现（用上游脚本）」，并注「若 H1 成立则改为 CI 直接调 cmake」 | **已直接调 cmake**（`build.yml:210-218`），步骤名 `Configure and build core-ui from source` → **H1 绕法已落地** | 🟡 过期 | 当前态改为「直接调 cmake」；§5.1「障碍与绕法」应标为**已实施** |
+| **C-5** | §2 快照 + §3.2 | 未记录 | 三个新事实：**`ilammy/msvc-dev-cmd@v1`** 导入 MSVC x64 环境（`build.yml:99-101`）；**`::error::` workflow command** 把异常做成 check-run annotation（`build.yml:225,233`）；**日志尾部进 step summary**（`build.yml:239-241`） | 🟡 漏记 | 当前态补三项 |
+| **C-6** | §3.3 第 17 行 + §4.2 | 当前态「打包拷 `app/target/release/core-ui.dll.revision`（**若存在**）→ **戳记由 Rust 侧 build.rs/构建产出**」；判定「🟡 **戳记的产出方要定**」 | **实际由 CI 的 Gate G2 步骤写出**（`build.yml:286-289`：`Set-Content "$dll.revision"`）→ **永远是 CI 产出、永远存在** | ⛔ **实质冲突** | 见 §9.3 |
+| **C-7** | §4.2 契约要求 | 「CI 侧加一条断言『**打包进去的戳记 == `packaging/core-ui-revision.txt`**』」 | **未实现**。包内戳记内容 = `VERSION` + 换行 + `revision`（两行），而 `packaging/core-ui-revision.txt` = 单行 SHA `1840d689…` | ⛔ **断言缺失** | 见 §9.3 |
+| **C-8** | §4.4 S13 行 | 「扫描 `assets/*.uix` + `assets/themes.json` 的自定义属性定义 → 命中库 34 个 token 全集即失败；**另禁自定义 `--app-accent`**」 | `assets/themes.json` **定义**了 `--app-accent`（light `#2563EB` / dark `#60A5FA`），且 `revision.decision` 与 `docs/12` §4.3 #8 都明确「accent 保留 `--app-accent` 作为唯一源值，由 Rust 调 `ui_theme_set_accent_hex()`」 | ⛔ **规则与现行资产直接对撞** | 见 §9.4 |
+
+### 9.3 C-6 / C-7 —— revision 戳记的**三方口径不一致**（最需要裁决的一条）
+
+| 来源 | 口径 | 原文要点 |
+|---|---|---|
+| `spec/ffi-core-ui.md` §5.5 | **甲**（已定） | 「**谁写**：**Rust 侧** `crates/zsdesk-coreui/build.rs` 在**编译期**写出。**CI 不自己写戳记**」／「**写什么**：`packaging/core-ui-revision.txt` 的内容去首尾空白后，**原样写入** + 一个换行；**无 BOM**」／「**CI 做什么**：**只校验**……不等即**打包失败**」 |
+| `spec/ci-contract.md` §3.3 行 17 + §4.2 | **未定**（行 17 判定「🟡 产出方要定」；§4.2 说「架构侧推荐：甲」） | 与 §5.5 的「已定」**自相矛盾** |
+| `.github/workflows/build.yml` | **乙**（实际实现） | `build.yml:286-289` 在 Gate G2 步骤里 `Set-Content "$dll.revision"`，内容 = `VERSION` + 换行 + `revision`（**两行**） |
+
+**后果（可判定，不是推测）**：
+
+1. **戳记内容与运行时比对口径不一致** —— `ffi-core-ui.md` §5.5 规定运行时的 `EXPECTED_REVISION` 就是 `packaging/core-ui-revision.txt` 的内容（SHA），而包内戳记首行是 `VERSION`（如 `1.9.0.346`）→ `trim()` 后**必然不等** → 每次启动都会报「戳记与编译期常量不一致」的警告（按 §5.5 的运行时语义是**警告、不阻断启动**，所以不会挂，但**自证机制等于失效**）。
+2. **契约要求的打包断言缺失** → 没有一道机器门禁能挡住「戳记内容错了」。
+3. **编码方面没有 BOM 问题** ✅ —— `shell: pwsh` 用的是 PowerShell 7，`Set-Content -Encoding utf8` **不带 BOM**，符合 §5.5 的「无 BOM」要求。（若 runner 回落成 Windows PowerShell 5.1 才会有 BOM，但 `shell: pwsh` 已显式指定。）
+4. **位置方面满足要求** ✅ —— `build.yml` 写到 `core-ui/clang-cl-build/core-ui.dll.revision`，经 artifact 搬运后落到 `app/target/release/`（即 exe 同目录）。
+
+**建议（QA 只给建议，不改实现）**：
+
+- 短期（M1 前，绑定层未落地）：`build.yml` 可以继续写戳记，但**内容应改成 `packaging/core-ui-revision.txt` 的原样内容**（单行 SHA），并**补上契约 §4.2 要求的断言**「包内戳记 trim == `packaging/core-ui-revision.txt` trim，不等即打包失败」；同时在契约 §3.3 行 17 与 §4.2 里把「产出方要定」改成**「当前态：CI 暂代写入（绑定层落地后移交 Rust build.rs）」**，避免两处 spec 各说一套。
+- 长期（M1 后）：按 `ffi-core-ui.md` §5.5 口径甲，戳记改由 `crates/zsdesk-coreui/build.rs` 写，CI 只校验。
+- **无论哪条口径，都必须有一条机器断言**把「包内戳记 == `packaging/core-ui-revision.txt`」钉死 —— 这是 `mechanical-gates.md §二`「没有执行器的规则只是建议」的直接应用。
+
+### 9.4 C-8 —— S13 的「禁 `--app-accent`」与现行 token 方案对撞（需要裁决）
+
+**事实**：
+
+- 契约 §4.4 的 S13 规则原文：「扫描 `assets/*.uix` + `assets/themes.json` 的自定义属性**定义**（`--name:`，不含 `var(--name)` 引用）→ 命中库 34 个 token 全集即失败；**另禁自定义 `--app-accent`**」。
+- `assets/themes.json` 现定义 `--app-accent`（`revision` 段的 `decision` 明写「accent 保留 `--app-accent` 作为唯一源值，由 Rust 调 `ui_theme_set_accent_hex()` 写进库 token `--accent`」）。
+- 实测：`--app-accent` **不在**库 34 个 token 里（库的叫 `--accent`）→ S13 的**前半句不会触发**；冲突的是**单独那一句**「另禁自定义 `--app-accent`」。
+- 实测 `.uix` 引用了 10 个 token，**`--app-accent` 不在其中** ✅（`assets/main.uix:82` 的 `.tab-active` 用的是**库 token** `var(--accent)`）。
+
+**建议**：把 S13 改成两条可机械判死的规则：
+
+1. **禁「与库 34 个 token 同名」的自定义属性**（含 `--accent` / `--bg` / `--sidebar-bg` / `--fg` …）—— 这才是 S13 真正要防的（切主题时被库接管）。
+2. **`--app-accent` 允许存在**，但追加一条断言：**`--app-accent` 不得出现在任何 `.uix` 的 `var()` 引用里**（它只是 Rust → `ui_theme_set_accent_hex()` 的搬运值，不是 CSS 变量）。
+
+### 9.5 `build.yml` 里的两处注释残留（不影响功能，建议清理）
+
+| 位置 | 问题 |
+|---|---|
+| `build.yml:162-167` | **遗留注释块**仍写「预置该源码到 FetchContent 的默认落点 **`_deps/quickjs-src`**」「**预置失败不阻断：让上游脚本自己走 FetchContent 下载路径**」—— 与 168-179 的新注释、与实际代码（**直接调 cmake**；预置失败 `exit $LASTEXITCODE` 阻断）**三处矛盾**。建议整块删除 |
+| `build.yml:394-396` | 注释说「Rust 必须在加载前把 `:root` 拼进 `.uix` 源码」→ **没写「拼进 `<style>` 块内部」**，与 B1 定稿（§8.2）不一致。建议补一句，避免实现方拼到源码顶层 |
+
+### 9.6 契约 §4.4「4 个脚本都不存在」→ 现状需记一笔
+
+契约 §4.4 的 4 个脚本**仍不存在**（`check_crate_dag.py` / `check-coreui-api.py` / `verify.py` / `gates_engineering.py`）→ §3.5 第 28–30 行的 ⛔ 判定**不变** ✅。
+但 `scripts/gates/` 现在**已存在**且有 3 个 `.uix` 专项门禁（`uix_tag_check.py` / `theme_contrast_check.py` / `qa_uix_verify.py`），**尚未接进 CI** → 建议在契约当前态记一笔。
+
+### 9.7 未能核实的（诚实边界）
+
+- **本版「直接调 cmake」路径是否已实跑通过** —— 本次只做静态核对，**没有 CI run 结果可查**，无法确认。契约 §5 记录的两次失败都发生在**旧路径**上。⇒ **这一条必须由 CI run 自证**（run 号 + 全绿日志），不能靠文档措辞。
+- `build.yml` 的 `::error::` annotation 是否真能在**外部公开 API** 读到（契约 §3.2 行 13 只要求「日志可取」）—— 未实跑，未核实。
+
+---
+
+## 10. 协作纪律（本轮新增，team-lead 与 QA 共同遵守）
+
+> **任何人不得对「他人正在编辑的文件」做批量改写**（`sed -i` / 全文替换 / 格式化工具 / 批量重写）。
+> 确需改动，**先 SendMessage 协调**，或**只改自己产出的文件**。
+
+**缘起**：本轮 QA 在 `assets/about.uix` 上做负控测试时误用了 `sed -i`，而前端同时在改该文件。虽经逐行核对**无内容损失**（其 B2 修改完整保留、测试残留零命中），但流程不可接受 —— 竞态下**任何一次还原都可能覆盖对方的改动**。
+
+**落地细则**：
+
+| # | 规则 | 落地方式 |
+|---|---|---|
+| 1 | QA 的**负控测试一律在临时副本**上做 | 复制资产到临时目录 → `python3 scripts/gates/qa_uix_verify.py --root <副本目录>` → 副本用完即弃。**绝不碰工作区文件** |
+| 2 | 改他人文件前**先 SendMessage 协调** | 协调结论写进消息，双方确认后再动 |
+| 3 | 被授权后**只做最小、可定位的定点编辑** | 用 `Edit` 精确替换单行/单段，不整文件重写；改完立刻回读校验（本次 M01 回填即按此做：改完 grep + 逐行核对，确认无乱码） |
+| 4 | **QA 的门禁脚本全程只读** | `qa_uix_verify.py` 与 `theme_contrast_check.py` **零写操作**（已实测：无 `open(...,'w')` / `write_text` / `shutil` / `os.remove`）→ 可放心对工作区跑 |
+| 5 | 数字类断言**必须自己实测** | 不得凭印象写数字（见 §8.8 的两条撤回） |
+
+---

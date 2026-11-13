@@ -285,6 +285,28 @@ if (IsRootSelector(sel)) continue;
 自定义属性之间同特异性 → **source order 决定谁赢**。
 若 `.uix` 里将来也出现 `:root { --app-bg: … }`，必须保证 **Rust 的值生效** → 注入位置要靠后（形态甲天然满足）。
 
+**规则 5 —— ★ 注入的键集里必须排除 `--app-accent`（D14 连带）**
+
+`--app-accent` 在 D14 之后是 **Rust 侧读系统色失败时的回退源值**（数据字段），
+**不是 CSS 变量** → 它**不得**进 `:root`。
+注入它没有消费者（`.uix` 一律读 `var(--accent)`），且一旦有人写 `var(--app-accent)`
+就会与系统色脱钩 → 又变成「自绘区蓝 + 库控件蓝」两种蓝。
+→ Rust 拼 `:root` 时的键集 = `themes.json` 当前模式的**全部 `--app-*` 键，减去 `--app-accent`**。
+
+**★ 四口径速查（对外统一措辞：`spec/ffi-core-ui.md` §4.3.2.1 与 `spec/crate-layout.md` §4.3 逐字一致）**
+
+| # | 口径 | 一句话 |
+|---|---|---|
+| 1 | **拼进 `<style>` 块内** | `:root` 必须包在 `<style>` 里，裸放源码顶层 → 整页 load 失败。Rust 统一**在源码末尾追加一个完整的 `<style>` 块** |
+| 2 | **只允许 CSS 变量** | `:root` 里只写 `--app-*`；`background` / `color` / `font-family` 会被**静默丢弃**（`cascade.cpp:124-126`） |
+| 3 | **根样式走 `.root` class** | 根 `<div class="root">` + `.root { … }`；`window { … }` 匹配 0 个节点 |
+| 4 | **Rust 侧加载前自检** | 断言每个 `:root` 都落在某个 `<style>` 区间内 → 不满足**在 Rust 侧 fail-fast**，不许留给 core-ui 报 "SFC parse failed" |
+
+> 口径 1 的**两种合法形态**：甲（**推荐**，Rust 实现走这个）= 末尾追加完整 `<style>` 块；
+> 乙 = 插进**已有** `<style>` 块内部（此时该块必须是**最后一个** `<style>` 块）。
+> 本项目三个 `.uix` 目前**各只有一个** `<style>` 块 → 乙也合法；
+> 但 Rust 实现**统一走甲**，不依赖「恰好一个」这个巧合。
+
 
 ### 4.3.3 ★ `.uix` 解析的三条硬约束（2026-11-13 源码级核对）
 
@@ -581,9 +603,32 @@ CI 从**仓库 main** 编译 core-ui（D03）。按 PM 的源码扫描，pinned 
 |---|---|
 | **谁写** | **Rust 侧**：`crates/zsdesk-coreui/build.rs` 在**编译期**写出。CI **不自己写**戳记 |
 | **何时** | 每次 `cargo build` / `cargo test` 运行 build.rs 时（因此与 exe 天然同版本） |
-| **写什么** | `packaging/core-ui-revision.txt` 的内容去首尾空白后，原样写入 + **一个换行**；**无 BOM** |
+| **写什么** | `packaging/core-ui-revision.txt` 的内容去首尾空白后，原样写入 + **一个换行**；**无 BOM**。**只有一行**（40 位十六进制 SHA）—— **版本号不写进戳记**（DLL 版本由版本资源承担，见 Gate G2） |
 | **写到哪** | **与最终 exe 同目录** → `target/<profile>/core-ui.dll.revision`（`OUT_DIR` 往回 3 层） |
 | **CI 做什么** | **只校验**：打包后断言「包内 `core-ui.dll.revision` 的内容（trim）== `packaging/core-ui-revision.txt` 的内容（trim）」；不等即**打包失败** |
+| **⚠️ 前置条件** | CI 的构建必须**真的编到 `zsdesk-coreui` 这个 crate**（`zsdesk-app` 依赖它，或 CI 额外跑一次 `cargo build -p zsdesk-coreui`）—— 否则 build.rs 不跑 → `target/release/core-ui.dll.revision` 不存在 → 打包断言失败（这是**预期行为**：失败即停） |
+
+**CI 断言（PowerShell，可直接贴进 `build.yml`）**：
+
+```powershell
+# 打包后：包内戳记 == packaging/core-ui-revision.txt
+$expected = (Get-Content -LiteralPath 'app/packaging/core-ui-revision.txt' -Raw).Trim()
+$stampPath = Join-Path $stage 'core-ui.dll.revision'
+if (-not (Test-Path -LiteralPath $stampPath)) {
+    throw "戳记缺失：$stampPath 不存在 —— Rust 侧 build.rs 没跑？"
+}
+$actual = (Get-Content -LiteralPath $stampPath -Raw).Trim()
+if ($actual -ne $expected) {
+    throw "戳记不一致：包内 '$actual' != packaging/core-ui-revision.txt '$expected'"
+}
+Write-Host "stamp OK: $actual"
+```
+
+> **CI 侧要删的那一步**：现在 `build.yml` 的 Gate G2 里有一段
+> `Set-Content ... "$expected`n<revision>"`（写 `core-ui/clang-cl-build/core-ui.dll.revision`，**两行**）
+> —— **按本契约删掉它**。理由：戳记只能有一个来源（编译期常量），CI 再写一次就有两个来源，
+> 比对失去意义；而且 CI 那份在 `clang-cl-build/` 目录里，**不是 exe 同目录**，本就该被排除。
+> 打包步骤**不用改**：它已经在拷 `app/target/release/core-ui.dll.revision` —— 那正是 build.rs 写到的地方。
 
 **为什么是 Rust 产出**：编译期常量 `EXPECTED_REVISION` 是**唯一权威来源**。
 若由 CI 写戳记，就会出现两个来源（编译期常量 vs CI 读的文件）→ 比对失去意义。
@@ -670,7 +715,7 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 | 类别 | 数量 | 做法 |
 |---|---:|---|
 | **改名避让** | **16** | `--bg`→`--app-bg`、`--content-bg`→`--app-content-bg`、`--sidebar-bg`→`--app-sidebar-bg`、`--toolbar-bg`→`--app-toolbar-bg`、`--text`→`--app-text`、`--text-secondary`→`--app-text-secondary`、`--divider`→`--app-divider`、`--hover`→`--app-hover`、`--pressed`→`--app-pressed`、`--selection-bg`→`--app-selection-bg`、`--info-*`/`--warning-*`/`--danger-*` 共 6 个 → `--app-*` | 统一到 `--app-*` 命名空间，**一个都不保留原名**；这些键**不在**库的 `kThemeKeys` 里 → 不会被 `RebuildThemeVars` erase |
-| **改用库 token** | **1** | **accent** —— CSS 侧读 `var(--accent)`，**不自定义**；由 Rust 侧 `ui_theme_set_accent_hex()` 写进库 palette 并同步到库 token，且**跨 `ui_theme_set_mode` 保留** | 若自定义 `--app-accent`，库自绘控件（primary 按钮 / 焦点环 / 滑块 / 进度条）仍是库默认蓝 `#3971EC`，与自绘区的 `#2563EB` **撞成两种蓝** |
+| **改用库 token** | **1** | **accent** —— CSS 侧读 `var(--accent)`，**不自定义**；由 Rust 侧 `ui_theme_set_accent_hex()` 写进库 palette 并同步到库 token，且**跨 `ui_theme_set_mode` 保留**。**值来源 = 系统 `AccentColor`（D14），读不到才回退 `themes.json` 的 `--app-accent`** | 若自定义 `--app-accent`，库自绘控件（primary 按钮 / 焦点环 / 滑块 / 进度条）仍是库默认蓝 `#3971EC`，与自绘区的 `#2563EB` **撞成两种蓝** |
 
 **架构侧补的三条运行时契约**：
 
@@ -683,25 +728,36 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 > **顺序是硬要求**：注入必须**早于** load。晚一步 → 自定义属性不存在 →
 > `var(--app-bg)` 解析失败 → **静默回落到库默认色**，界面白得像「能跑」但配色全错。
 
-#### 契约 2：Rust 初始化时的调用顺序与各自的影响范围
+#### 契约 2：Rust 初始化时的调用顺序与各自的影响范围（**D14 生效版**）
 
 ```
+0. 读系统 AccentColor（读不到 → 取 assets/themes.json 当前模式的 --app-accent）   ← D14 新增
 1. ui_theme_set_default_font(L"Segoe UI Variable")
    ui_theme_set_cjk_font(L"Segoe UI", L"Microsoft YaHei UI")
 2. ui_theme_set_mode(UiThemeMode::Light /* 或 Dark */)
-3. ui_theme_set_accent_hex("#2563EB")        // = 该模式 themes.json 的 accent
-4. 拼 ":root { --app-bg: …; … }" 注入 .uix 源码 → ui_page_load_string(...)
+3. ui_theme_set_accent_hex("<第 0 步算出的 #RRGGBB>")   // system 优先，回退用 themes.json
+4. 拼 ":root { --app-bg: …; … }" → 追加为源码末尾的一个完整 <style> 块 → ui_page_load_string(...)
 ```
 
 | 步 | 影响范围 | 顺序为什么重要 |
 |---|---|---|
+| 0 | 决定第 3 步的实参（值 + 来源） | 必须在 3 之前；**失败不得抛错**（读不到系统色是正常情况，走回退） |
 | 1 | 控件字体（`theme::kFontFamily`）；**`.uix` 里的 `font-family` 对普通 LabelWidget 不生效**（`renderer.cpp` 读该属性的三处都在 SVG 文本路径） | 必须在 load 之前，否则首帧字体不对 |
 | 2 `set_mode` | `RefreshAllPageThemes` → `RebuildThemeVars`：**重写库的 34 个 token**，并**擦除用户同名 `:root` 值**（`--app-*` 不在其中 → **不受影响**） | — |
-| 3 `set_accent_hex` | `theme::SetAccent` → `RefreshAllPageThemes` → `RebuildThemeVars` → 同步到**库 token `--accent`**；**跨 `set_mode` 保留**（`theme.h:435-439`） | **必须在第 2 步之后或紧邻**：`set_mode` 会用**当前**的 accent override 重新派生 —— 顺序反了会拿到上一次的 accent |
+| 3 `set_accent_hex` | `theme::SetAccent` → `RefreshAllPageThemes` → `RebuildThemeVars` → 同步到**库 token `--accent`**；**跨 `set_mode` 保留**（`theme.h:435-439`：`SetMode` 会用当前 override 重新派生） | **必须在第 2 步之后**：顺序反了 → `set_mode` 用**上一次**的 accent override 重新派生 → 拿到旧值 |
 | 4 | 加载页面 | 必须在 1–3 之后 |
 
 > 第 3 步不能省：省了的话 `var(--accent)` 落到库默认 `#3971EC`，
 > 与设计稿的 `#2563EB` 不符 → 表现为「自绘区蓝、按钮蓝」**两种蓝**。
+
+> **⚠️ 第 3 步的值来自第 0 步，不是写死的 `#2563EB`** —— 用户原稿 `docs/07` §4 写的是
+> 「`--accent` 跟随系统 `AccentColor`」，而 core-ui **不读系统色**（实测零命中）→
+> 「跟随系统」必须由 Rust 侧实现。详见 §5.6.2。
+>
+> **切模式后必须重读重调**：accent override **跨模式保留**（`theme.h:435-439`），
+> 所以手动切深浅色后，若不重新读系统色并再调一次 `ui_theme_set_accent_hex`，
+> 会沿用**上一个模式**的强调色（Win11 的深浅可能用不同的 `AccentColor`）。
+> → 手动切换的完整顺序 = 读 accent → `set_mode` → `set_accent_hex` → 重建页面。
 
 #### 契约 3：深浅色切换 —— `--app-*` **不会自动变**，缺口用「Rust 侧重建页面」补
 
@@ -767,12 +823,83 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 >    **自定义属性与库 token 在名字空间上完全不相交** → 这条门禁可以用
 >    「名字空间不相交」一句话概括，不依赖 34 个名字的清单是否最新。
 >
-> **附带两条**：
+> **附带三条**：
 > - **禁止定义 `--app-accent`** —— accent 走**库 token**（`var(--accent)` 引用），
 >   由 Rust 侧 `ui_theme_set_accent_hex()` 钉住；自定义它会导致「自绘区蓝 + 库控件蓝」两种蓝；
-> - **允许** `var(--accent)` 这类**引用**（不是定义）→ 门禁只拦「定义」不拦「引用」。
+> - **允许** `var(--accent)` 这类**引用**（不是定义）→ 门禁只拦「定义」不拦「引用」；
+> - ★ **D14 细化（两处例外，必须写进门禁脚本）**：
+>   1. **`.uix` 文件里禁止定义 `--app-accent`** —— `.uix` 的强调色一律 `var(--accent)`；
+>   2. **`assets/themes.json` 里允许存在 `--app-accent`** —— 它在 D14 之后是
+>      **Rust 侧读系统色失败时的回退源值**（数据字段），**不是 CSS 变量**；
+>      → **Rust 拼 `:root` 时必须把它排除**，不得注入；
+>      → **门禁脚本要按「文件类型」区分**，不能一刀切禁掉 `themes.json` 里的这个键
+>      （前端已按此把它写进 `assets/themes.json` 的 light/dark 两套）。
 
 **M1 验收项 V1.9**（深浅色切换不突变）就是这条的直接检验。
+
+---
+
+### 5.6.2 ★ D14 品牌色来源契约（Rust 侧读系统 `AccentColor`）
+
+**为什么必须有这一节**：用户原稿 `docs/07-UI-DESIGN-WINUI3.md` §4 的 token 表原文写着
+「`--accent` | **跟随系统 `AccentColor`**」。
+但 **core-ui 自己不读系统色** —— 架构侧在 pinned revision 的 `src/` + `include/` 全量 grep：
+`GetSysColor` / `UISettings` / `AccentColor` **零命中**；
+`src/ui/theme.h:446` 的 `SetAccent(const D2D1_COLOR_F& base)` **只接受外部传入的值**
+（`alpha <= 0` 视作「取消覆盖」回到库默认）。
+
+→ 「跟随系统」这件事**只能由 Rust 侧实现**。库提供的是**写入口**（`ui_theme_set_accent_hex`），
+不是**读取口**。
+
+#### 读取契约（逐字可执行）
+
+| 项 | 约定 |
+|---|---|
+| **读什么** | 注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\AccentColor` |
+| **类型** | `REG_DWORD`（用 `RegGetValueW` 读，**不要**用 `RegQueryValueExW` 逐个拼） |
+| **值布局** | **BGR 序**，即 DWORD = `0x00BBGGRR`：**低字节 = R**，次字节 = G，高字节 = B |
+| **转换** | `R = v & 0xFF`；`G = (v >> 8) & 0xFF`；`B = (v >> 16) & 0xFF`；拼成 `#RRGGBB`（大写 hex，`#` + 6 位） |
+| **对照例** | Win11 默认蓝 `#0078D4`（R=00, G=78, B=D4）在注册表里是 **`0x00D47800`** |
+| **⚠️ 写反的后果** | 把 BGR 当 RGB → `#D47800` = **橙色系**。这是本契约最容易犯的错（下面给了自检方法） |
+| **读到但非法** | 值为 0 / 键不存在 / 类型不是 `REG_DWORD` / `RegGetValueW` 失败 → **一律当作「读不到」**，走回退，**不报错、不崩** |
+| **回退源** | `assets/themes.json` **当前模式**的 `--app-accent`（light `#2563EB` / dark `#60A5FA`） |
+| **回退仍没有** | **不调** `ui_theme_set_accent_hex` → 用库默认 accent（`#3971EC`），并把来源记为 `default` |
+| **写入口** | `ui_theme_set_accent_hex(const char* hex)` —— **唯一**入口，UTF-8 |
+| **写入时机** | 契约 2 的第 3 步（**在 `set_mode` 之后**） |
+| **切模式后** | **必须重读重调**（accent override 跨模式保留 → 不重调会沿用上模式的系统色） |
+
+#### 落点（谁读、谁写）
+
+| 职责 | crate / 模块 | 说明 |
+|---|---|---|
+| **读注册表** | `crates/zsdesk-windows/src/system/accent.rs`（**新增**） | 平台相关读法归平台 crate；返回 `Option<SystemAccent>`，**不认识 core-ui**、不认识 FFI |
+| **决定值 + 调库** | `crates/zsdesk-app/src/theme.rs`（**改造上游同名文件**） | 组装根：`zsdesk-app` 是 composition root，同时依赖 `zsdesk-windows` 与 `zsdesk-coreui` |
+| **调 core-ui** | `crates/zsdesk-coreui/`（`ui_theme_set_accent_hex` 的绑定） | FFI crate **不依赖** `zsdesk-windows`（否则会把平台 crate 拖进 FFI 层，违反 §2.3 的分层） |
+
+> **依赖方向**：`zsdesk-app → { zsdesk-windows, zsdesk-coreui }`，`zsdesk-coreui ↛ zsdesk-windows`。
+> → 与 `spec/crate-layout.md` §2.2 的三条规则一致，不新增环。
+
+#### 启动日志（**M1 验收项 V1.11 的判据**）
+
+启动时**必须**打印一行（人话、可直接读）：
+
+```
+accent=#0078D4 source=system
+accent=#2563EB source=fallback(themes.json:light)
+accent=#3971EC source=default(library)
+```
+
+→ 真机核对方式：打开「设置 → 个性化 → 颜色」，看强调色 hex，与日志里的 `accent=` 对照。
+**若日志里的颜色呈橙色系 → BGR 写反了**（这是最快的自检手段）。
+
+#### 连带影响（必须同步改的地方）
+
+| 位置 | 要改什么 |
+|---|---|
+| **Rust 拼 `:root`** | **排除 `--app-accent`** —— 它是回退源值，不是 CSS 变量；注入它没有消费者，且一旦有人写 `var(--app-accent)` 就会与系统色脱钩 → 两种蓝 |
+| **`assets/themes.json`** | 保留 `--app-accent`（light/dark 各一）—— 现在它是**回退值**。前端已按此改完 |
+| **`assets/*.uix`** | 强调色一律 `var(--accent)`，**不得**出现 `var(--app-accent)` |
+| **门禁 S13** | 按「文件类型」区分：`themes.json` 允许 `--app-accent`；`.uix` 禁止定义它；任何文件都禁止定义库 token 全集（见 §5.6.1 的 S13） |
 
 ---
 

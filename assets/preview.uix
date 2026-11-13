@@ -56,6 +56,9 @@
 
   /* 预览提示行 / 通道状态行：占满宽度、可换行（Rust 侧写入的通道名可能较长） */
   .preview-hint { display: block; padding: 8px; color: var(--app-text-secondary); }
+  /* ⚠️ .preview-collapsed 当前是死规则（无元素引用）：core-ui 没有运行时设置
+     class 的 C API，Rust 切不到这个类 —— 折叠态只能靠 Rust 直接改宽度
+     （见 docs/12 §5 R10）。 */
   .preview-collapsed { width: 0px; }
   .preview-state { display: block; padding: 8px; color: var(--app-info-fg); }
 

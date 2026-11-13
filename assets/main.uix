@@ -122,7 +122,10 @@
   /* 竖向分隔线：core-ui 的 <Separator> 只有水平形态，竖线用 1px 宽的 div */
   .vsep { width: 1px; background: var(--app-divider); align-self: stretch; flex-shrink: 0; }
 
-  /* 信息条 36px（默认收起） */
+  /* 信息条 36px（默认收起）
+     ⚠️ .infobar-visible 当前是死规则（无元素引用）：core-ui 没有运行时设置 class
+     的 C API，Rust 切不到这个类 —— 展开态只能靠 Rust 直接改高度/可见性
+     （见 docs/12 §5 R7 / R10）。 */
   .infobar { height: 0px; background: var(--app-info-bg); flex-direction: row; }
   .infobar-visible { height: 36px; background: var(--app-info-bg); color: var(--app-text); }
 

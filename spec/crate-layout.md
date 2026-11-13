@@ -188,8 +188,9 @@ Rust 必须在加载前把 `:root { --app-*: … }` **拼进 `.uix` 源码**：
 ```
 读 assets/main.uix（UTF-8）
   → 读 assets/themes.json（当前模式的 token）
-  → 拼 ":root { --app-bg: …; … }"
-  → 拼进 .uix 源码
+  → 拼 ":root { --app-bg: …; … }"        ← 键集 = 全部 --app-*，减去 --app-accent（D14）
+  → 追加为源码末尾的一个完整 <style> 块  ← 不裸放顶层（否则整页 load 失败）
+  → Rust 侧自检：每个 :root 是否落在某个 <style> 区间内 → 不满足即 fail-fast
   → ui_page_load_string(utf8_source)      ← 注意是 const char*（UTF-8），不是 const wchar_t*
 ```
 
@@ -208,6 +209,51 @@ Rust 必须在加载前把 `:root { --app-*: … }` **拼进 `.uix` 源码**：
 | **`:root` 只能注入到 `<style>` 块内** | ★ QA B1 复核 + 架构侧核对（`sfc_parser.cpp:260-267`）：`:root` 若**裸放在源码顶层** → `unexpected content at top level` → `doc.ok=false` → **整页 load 失败**（报错 "SFC parse failed"，极难定位）。顶层只允许 `<window>` `<template>` `<script>` `<style>` `<import>` `<link>`。→ Rust 拼 `:root` 时**追加一个完整的 `<style>` 块到源码末尾**（多个 `<style>` 块允许，`sfc_parser.cpp:321-330`）；且**加载前自检**「`:root` 是否落在某个 `<style>` 块内」，不满足即 fail-fast。完整规则见 `spec/ffi-core-ui.md` §4.3.2.1 |
 | **`:root` 内只放 CSS 变量** | `cascade.cpp:124-126` 明确 `Skip :root — those only define CSS vars` → `:root { background/color/font-family }` 会被**静默丢弃**。→ `:root` 只写 `--app-*`；根节点的普通样式走 `.root` class |
 | **根窗口样式用 `.root` class** | `window { … }` 是标签选择器（`selector.cpp:59` `node.tag == "window"`），而 `<window>` **不产生 widget**（`sfc_parser.cpp:285-296`）→ 匹配 0 个节点 → 整条无效；`:root { … }` 在普通样式计算里被**显式跳过**（`cascade.cpp:125`），**只定义 CSS 变量**。→ 根 `<div class="root">` + `.root { … }` |
+| **`:root` 的键集要排除 `--app-accent`** | ★ D14：`--app-accent` 是 **Rust 读系统色失败时的回退源值**（数据字段），**不是 CSS 变量** → 不得注入 `:root`；`.uix` 里的强调色一律 `var(--accent)`（库 token）。注入它没有消费者，且会诱发「两种蓝」 |
+
+### 4.3.1 ★ `:root` 注入的**四口径**（对外统一措辞）
+
+> 与 `spec/ffi-core-ui.md` §4.3.2.1 **逐字一致**。前端已按这四点改完 `assets/themes.json`；
+> Rust 侧实现与门禁脚本按同一口径。
+
+| # | 口径 | 一句话 | 违反的后果 |
+|---|---|---|---|
+| 1 | **拼进 `<style>` 块内** | `:root` 必须包在 `<style>` 里；Rust 统一**在源码末尾追加一个完整的 `<style>` 块** | 裸放源码顶层 → `sfc_parser.cpp:260-267` 报 `unexpected content at top level` → **整页 load 失败**，报错 "SFC parse failed"，极难定位 |
+| 2 | **只允许 CSS 变量** | `:root` 里只写 `--app-*`（减去 `--app-accent`） | `background` / `color` / `font-family` 被 `cascade.cpp:124-126` **静默丢弃** |
+| 3 | **根样式走 `.root` class** | 根 `<div class="root">` + `.root { … }` | `window { … }` 匹配 0 个节点 → 整条无效（**不报错**，只是不生效） |
+| 4 | **Rust 侧加载前自检** | 断言每个 `:root` 落在某个 `<style>` 区间内 → 不满足**在 Rust 侧 fail-fast** | 错误被推迟到 core-ui 侧，表现为「SFC parse failed」，看不出是 `:root` 越界 |
+
+**合法形态**：甲（**推荐**，Rust 实现走这个）= 末尾追加完整 `<style>` 块；
+乙 = 插进**已有** `<style>` 块内部（该块须是**最后一个** `<style>`）。
+本项目三个 `.uix` 目前**各只有一个** `<style>` 块 → 乙也合法；但 Rust 统一走甲，不依赖这个巧合。
+
+### 4.4 ★ Rust 侧启动初始化职责落点（D14）
+
+| 步 | 做什么 | 落点（crate / 模块） | 失败处置 |
+|---|---|---|---|
+| 0 | **读系统 `AccentColor`**（注册表 `HKCU\...\Explorer\AccentColor`，**BGR 序**） | `crates/zsdesk-windows/src/system/accent.rs`（**新增**） | 读不到 → 回退 `themes.json` 当前模式的 `--app-accent`；再没有 → 用库默认 |
+| 0' | 决定生效 accent（值 + 来源标记） | `crates/zsdesk-app/src/theme.rs`（**改造上游同名文件**） | — |
+| 1–2 | `ui_theme_set_default_font` / `ui_theme_set_cjk_font` / `ui_theme_set_mode` | `crates/zsdesk-coreui/`（绑定）→ 由 `zsdesk-app` 调用 | 字体缺失 → 库回退默认字体（不崩） |
+| 3 | `ui_theme_set_accent_hex("#RRGGBB")` | 同上 | 值非法 → 不调用（用库默认） |
+| 4 | 拼 `:root` → **末尾追加完整 `<style>` 块** → **自检** → `ui_page_load_string` | `crates/zsdesk-app/src/theme.rs`（拼装） + `crates/zsdesk-coreui/`（调用） | 自检不过 → **fail-fast**，报「`:root` 必须在 `<style>` 块内」 |
+
+**依赖方向**：`zsdesk-app → { zsdesk-windows, zsdesk-coreui }`；
+**`zsdesk-coreui ↛ zsdesk-windows`**（FFI crate 不依赖平台 crate，§2.2 的分层不破、不新增环）。
+
+> **为什么读注册表归 `zsdesk-windows`**：注册表 / Shell / COM 这类 Win32 读写归平台 crate；
+> `zsdesk-coreui` 只负责「把 core-ui 调起来」，不认识注册表、不认识 Win32。
+> 业务拼装（读哪个模式、拼什么 `:root`、调什么顺序）归 `zsdesk-app` —— 它是 composition root。
+
+**启动日志（必须打印，M1 验收项 V1.11）**：
+
+```
+accent=#0078D4 source=system
+accent=#2563EB source=fallback(themes.json:light)
+accent=#3971EC source=default(library)
+```
+
+> **⚠️ BGR 坑**：注册表值是 **BGR 序**（`0x00BBGGRR`）→ 写成 RGB 会得到**橙色系**。
+> 真机核对：系统设置的强调色 hex 与日志里的 `accent=` 对不上 → 通道顺序反了。
 
 ---
 
