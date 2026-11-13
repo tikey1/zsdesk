@@ -3,7 +3,7 @@
 - 日期：2026-11-13
 - Fork：`tikey1/zsdesk`（public，`main`，HEAD `6aec0c2 Release ZSDesk 0.3.11 fixes`）
 - 上游：`qiu7824/zsdesk` v0.3.11，MIT，`Copyright (c) 2026 ZSDesk contributors`
-- 状态：**P0 已完成，P1~P4 待确认后执行**
+- 状态：**P0 已完成；C3（全量 x64）已拍板；C1 / C2 / C4 / C5 待确认，P1~P4 待执行**
 
 ## 1. 上游现状（只读调研结论）
 
@@ -31,8 +31,9 @@
 6. 代码编写与审查要求沿用既有规范；
 7. 只做 x86-64，不考虑 32 位 x86；
 8. 成果随时上传云盘，做好 UI 设计代码同步与合并。
+9. **（已拍板）只做全量 x64 版本**：唯一交付形态为 `full` edition + `windows-x64`，不构建、不测试、不发布其余 edition 与 32 位 x86。详见 §3.6。
 
-## 3. 必须先拍板的硬冲突
+## 3. 硬冲突（C3 已拍板，C1 / C2 / C4 / C5 待确认）
 
 ### C1 .NET 10「跨平台」与 Windows 原生栈冲突（阻塞）
 
@@ -48,11 +49,26 @@ Core UI 是 Windows DLL，GuoheView 是 Windows 可执行程序，WinUI 3 / Flue
 - 建议：P1 先在具备 Core UI 1.9.0.346 的真机核对 K-01~K-18，产出 `verified.rs`；否则 Core UI 接入只能停在「可编译的骨架」。
 - 可复用资产：`vendor/core-ui.dll`（4,782,536 B）、`docs/05-COREUI-EXPORTS.txt`（2006 个导出符号）、`docs/05-ABI-NOTES.md`、现有 `coreui/*` 模块。
 
-### C3 上游功能保留范围未定（阻塞规模估算）
+### C3 上游功能保留范围 ~~未定~~ → **已拍板：全量保留**
 
-ZSDesk 不止是文件管理器：桌面栅栏、Everything 集成、Listary 插件、MinHook、SQLite、5 个 edition、19 个 open issue。全量保留会让「替换 ZSUI」变成跨 138 个 Rust 文件的大改造；只保留标签页文件管理器核心则可大幅收窄。
+用户已明确「只做全量 x64 版本的」。即 **不裁剪上游功能**：桌面栅栏、Everything 快速搜索、Listary 插件、MinHook、SQLite、网络 / 桌面能力全部保留，改造在完整代码基上做（跨约 138 个 Rust 文件），不做「只留文件管理器核心」的收窄。
 
-- 建议：明确「保留 / 剔除」清单后再动业务代码；默认按**只保留标签页浏览 + 图片预览核心**收窄。
+- 影响：P2 的 ZSUI → Core UI 替换范围扩大，必须按 crate 分阶段推进并保留每条业务链路的回归测试；不能靠删功能来规避替换工作量。
+- 唯一收窄的是**交付形态**（见 §3.6），不是功能集。
+
+### C3.6 平台与交付形态（已拍板）
+
+| 项 | 结论 | 依据 |
+|---|---|---|
+| 唯一 edition | **`full`** | `crates/zsdesk-app/src/edition.rs` 的 `key()`：`NETWORK && DESKTOP && !THEMED && !DESKTOP_ONLY` → `"full"`（名称「全量版」） |
+| features | `network + desktop`（即 `default`） | `crates/zsdesk-app/Cargo.toml` `[features]` 与 `scripts/package.ps1` 的 `$definitions.full = @{ Features=@('network','desktop') }` |
+| 目标平台 | **仅 `windows-x64`** | `package.ps1` 头部即写明 "Builds verified Windows x64 editions"；`VCToolsRedistDir x64`、Everything engine pin `platform=windows-x64`、输出名 `ZSDesk-$version-$edition-x64`、manifest `platform='windows-x64'` |
+| 不构建 / 不发布 | `standard` / `network` / `desktop` / `themed` / `desktop-box` 单版；**任何 32 位 x86** | 用户明确要求 |
+| C++ v14 运行库 | 沿用上游既有机制 | `package.ps1` 已强制校验 `Visual C++ x64 Redistributable`（`msvcp140.dll` 等），缺 `-RuntimeDir` 直接 throw；`core-ui.dll` 同样依赖 `MSVCP140` / `VCRUNTIME140` / `VCRUNTIME140_1` |
+| CI 调整 | 收窄为只跑 `full` x64 的 build / test / clippy + 打包 | 上游 `build.yml` 现有「Check all editions」「Test theme and desktop-only editions」两步需删除或改为仅 full |
+| 打包产物 | 单一 `ZSDesk-<version>-full-x64` 便携包 / 安装包，逐文件 `bytes + SHA-256` manifest | 沿用上游 `package.ps1` 已有清单机制，与本项目的 `stage-portable.ps1` 实践一致 |
+
+> 结论：x64-only 与 C++ v14 运行库**上游已经天然满足**，这部分不需要额外设计；需要改的是「多 edition 并行构建」收窄为「仅 full」。
 
 ### C4 ZSUI 是仓库外 MPL-2.0 依赖
 
@@ -67,10 +83,10 @@ GitHub fork 公开仓库默认为 **public**；fork 的 Actions 默认**未启�
 | 阶段 | 内容 | 前置 |
 |---|---|---|
 | **P0（本轮已完成）** | 创建 fork；SSH 克隆；只读调研；同步合并 UI 设计文档与静态资源；产出本路线图 | 无 |
-| **P1** | 拍板 C1~C5；建立 Gate 0~4 / R1~R12 门禁与审查模板；把 `--locked` / x64-only / 逐文件 SHA-256 打包实践移植过来；确认 UI 更新状态后创建 CI | C1~C5 |
-| **P2** | 拆 `zsui` path 依赖，建立 Core UI 接入骨架；WinUI 3 静态布局 + 主题 token 落地；保持可编译 | K-01~K-18 核对结论 |
+| **P1** | 拍板 C1 / C2 / C4 / C5；建立 Gate 0~4 / R1~R12 门禁与审查模板；**把 `build.yml` 从多 edition 收窄为仅 `full` x64**（删「Check all editions」「Test theme and desktop-only editions」），保留 `--locked` / 逐文件 SHA-256 / VC++ x64 Redist 校验；确认 UI 更新状态后启用并创建 CI | C1 / C2 / C4 / C5 |
+| **P2** | 在**全量功能基线上**按 crate 分阶段拆 `zsui` path 依赖，建立 Core UI 接入骨架；WinUI 3 静态布局 + 主题 token 落地；每条业务链路配回归测试，保持可编译 | K-01~K-18 核对结论 |
 | **P3** | GuoheView 强关联图片预览（复用 `preview_process` / `quicklook` / `image_decode` 链路），补降级通道与错误提示 | P2 |
-| **P4** | 完整回归（build / test / clippy / Gate 1 / 真机冒烟）→ 便携包 → Release → 审查留痕 → 云盘归档 | P3 |
+| **P4** | 完整回归（full x64 的 build / test / clippy / Gate 1 / 真机冒烟）→ 单一 `ZSDesk-<ver>-full-x64` 便携包 → Release → 审查留痕 → 云盘归档 | P3 |
 
 ## 5. 沿用工程规范（不打折）
 

@@ -23,6 +23,12 @@
 - 许可：MIT，`Copyright (c) 2026 ZSDesk contributors`；上游 `LICENSE` 与 `THIRD-PARTY-NOTICES.txt` 原样保留
 - 构建：`cargo test --workspace --release --locked`，Rust 1.89+ / CI 固定 1.99.0；Windows x64
 
+## 交付形态（已拍板）
+
+**只做全量 x64 版本**：唯一 edition 为 `full`（features `network + desktop`，即默认 features），平台仅 `windows-x64`。不构建 / 不测试 / 不发布 `standard` / `network` / `desktop` / `themed` / `desktop-box` 单版，也不做 32 位 x86。功能集**不裁剪**（桌面栅栏、Everything、Listary、MinHook、SQLite 全保留）。
+
+上游 `scripts/package.ps1` 本身已是 x64-only：强制校验 Visual C++ x64 Redistributable（C++ v14 运行库）、Everything engine pin `platform=windows-x64`，并生成逐文件 `bytes + SHA-256` manifest。CI 需从「多 edition 并行」收窄为「仅 full x64」，详见路线图 §3.6 / §4。
+
 ## 注意事项
 
 - 上游 `zsdesk-ui` 与 `zsdesk-app` 依赖仓库外的 `zsui`（`../../../zsui`，MPL-2.0）；CI 通过额外 checkout `qiu7824/zsui` 满足。本地单独 clone 本仓库无法直接编译，需要按 `.github/workflows/build.yml` 的方式同时准备 ZSUI。
