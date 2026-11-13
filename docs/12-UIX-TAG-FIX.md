@@ -13,12 +13,12 @@
 |---|---|
 | 修正文件 | `assets/main.uix`、`assets/preview.uix`、`assets/about.uix` |
 | 标签替换 | `<text>`×25、`<hbox>`×8、`<vbox>`×3、`<text-input>`×3、`<panel>`×5、`<vseparator>`×2、`<separator>`×7（**共 53 处**） |
-| 元素总数 | **模板体元素数不变**（main 30→30、preview 9→9、about 16→16）——只换标签，不增删元素。连 `<window>`/`<style>`/`<template>` 三个 SFC 外壳一起算是 33/12/19，同样不变 |
+| 元素总数 | **模板体元素数不变**（main 30→30、preview 9→9、about 16→16）——只换标签，不增删元素。<br>**口径统一**：一律指**模板体**元素数，**不含 4 个 SFC 外壳标签**（`<window>` `<script>` `<style>` `<template>`）；含外壳则是 34/12/19（`docs/11` §2 用的是这个口径，`uix_tag_check.py` 因剥掉 `<script>` 是 33/12/19） |
 | id 保留 | main 21 / preview 6 / about 0 —— **一个没少，一个没改**（Rust 侧 `ui_widget_find_by_id` 不受影响） |
 | class 保留 | 原有 class 全部保留；**新增 3 个**（`.root`、`.tab-placeholder`、`.nav-hint`）；`.divider` 规则从「只设 background」改为「设 height + background + flex-shrink」（见 §2.6） |
 | 结构级修正 | 6 处（见 §2）——不改设计，只让 core-ui 真正认得 |
 | 主题 token | 17 个 token 全部加 `--app-` 前缀（见 §4） |
-| 复核 | 经 QA 第一轮复核（`docs/14-QA-UIX-REVIEW.md`）：3 阻塞 + 7 重要 + 5 建议，**已全部处理**，逐条对应见 §2.6 / §4.2 / §4.4 / §5 R10 / §6 / §8 |
+| 复核 | QA 第一轮（3 阻塞 + 7 重要 + 5 建议）**已全部处理**；QA 第二轮（B2 / I5 / M06 复核通过）**通过**；交付总监裁决 I4（标题字重）**已落**；架构裁定自绘宿主用 `<custom>` **已落**。逐条对应见 §2.6 / §4.2 / §4.4 / §5 R6/R10 / §6 / §8 |
 | 未验证 | **本机无 Rust/C++ 工具链，全部结论未经编译或渲染验证**；凡推断均标 `[推断]` |
 
 > ⚠️ **docs/11 §2 的标签统计有误**：它写 `<text>`×10、`<hbox>`×7、`<vbox>`×1、`<text-input>`×2、`<panel>`×4。
@@ -46,7 +46,9 @@
 | `display` / `align-self` / `white-space` / `flex-shrink` 受支持 | `widget_factory.cpp:445-451`（display）、`:738-746`（align-self）、`:700-711`（white-space）、`:903-908`（flex-shrink） |
 | `border-bottom` **不受支持** | `widget_factory.cpp:631-653` 只认 `border` / `border-color` / `border-width` / `border-radius` |
 | `font-family` 对普通 LabelWidget **不生效** | `src/ui/renderer.cpp:3759 / 4907 / 5182` 均在 SVG 文本路径；普通控件文字用 `theme::kFontFamily`（`src/ui/theme.h:498` = L"Segoe UI"）或 `ui_theme_set_default_font` 设的值 |
-| CSS 变量 `var()` 支持，自定义属性**必须在 `:root`** | `src/ui/css/cascade.cpp:42-54`（匹配 `var(`）、`src/ui/css/value.h:91`、`cascade.h:45`、`:134`（非 `:root` 级自定义属性被忽略） |
+| CSS 变量 `var()` 支持，自定义属性**必须在 `:root`** | `src/ui/css/cascade.cpp:42-54`（匹配 `var(`）、`src/ui/css/value.h:91-93`、`cascade.h:41-43`、`:134`（非 `:root` 级自定义属性被忽略） |
+| **`:root` 块里只能放变量**，放普通样式会被丢掉 | `cascade.cpp:125`「Skip :root — those only define CSS vars, handled separately」→ `:root` 规则整体被跳过（`CollectRootVars` 单独处理其中的 `--*`） |
+| `<custom>` 的 CSS 宽高**会**生效（与 `<separator>` 相反） | `widget_factory.cpp:1114-1118` 注释原文「CSS width/height 走 ApplyCommonStyle 自然生效」 |
 | 库自带 34 个 token，`ui_theme_set_mode` 会覆盖同名用户值 | `src/ui/page/compiler.cpp:1647-1660`（`kThemeKeys[]` 34 项）+ `:1672-1700`（`RebuildThemeVars` 先 erase 再重写） |
 
 ---
@@ -61,7 +63,8 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 |---|---|---|
 | main | `<window title="tabbed_files" width="1200" height="800">` … `</window>` | `<window title="tabbed_files" width="1200" height="800" />` + 顶层 `<script>`/`<style>`/`<template>` |
 
-**依据**：`sfc_parser.cpp:294`「`<window>` must be self-closing (use `<window .../>`)」→ `pushErr` → `skipUntilClose` 会把 `</window>` 之前的内容**整段跳过** → `doc.ok=false` → `page_api.cpp:251-255` 返回 "SFC parse failed"。
+**依据**（路径是 `src/ui/uix/sfc_parser.cpp`，**不是** `src/ui/page/`）：
+`sfc_parser.cpp:294`「`<window>` must be self-closing (use `<window .../>`)」→ `pushErr` → `skipUntilClose` 会把 `</window>` 之前的内容**整段跳过** → `sfc_parser.cpp:373`「`if (!doc.errors.empty()) doc.ok = false;`」→ `page_api.cpp:249-255` 返回 "SFC parse failed"。
 **影响**：原写法下三个 `.uix` **整页加载失败**（不是局部缺失，是全白/无窗口）。这比标签不识别更致命，必须先修。
 **取法**：参照上游 demo `demo/ui_demo.uix:1-4` 的写法。`<window>` 的属性（title/width/height）原样保留。
 
@@ -79,7 +82,9 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 原：`<style> window { background: var(--bg); color: var(--text); font-family: …; } </style>`
 现：`<style> .root { background: var(--app-bg); color: var(--app-text); font-family: …; } </style>` + `<div class="root">` 作为模板根节点。
 
-**依据**：`<window>` 是 SFC 外壳，不产生控件；级联只对模板节点做匹配（`cascade.cpp:112-145`）。
+**依据**：`<window>` 是 SFC 层面的窗口配置标签，**不产生任何 widget**（`sfc_parser.cpp:285-296` 只把 attrs 存进 `doc.windowAttrs`）→ **没有任何节点的 tag 是 `window`** → 整条规则命中 **0 个节点**（级联只对模板节点匹配，`cascade.cpp:112-145`）。
+**改口说明**：不是「`window` 规则会落到根节点」，而是「**`window` 选择器匹配不到任何东西**」—— 必须**显式给根 `<div>` 加 `class="root"` 再用 `.root { … }`**。写法结果一样，但按前者理解会以为 `window` 选择器有效，将来 core-ui 若加了同名节点就会踩坑。
+**另**：`:root` 是伪类，在普通样式计算里被**显式跳过**（`cascade.cpp:125`）→ `:root` 块里**只能放 CSS 变量**，放 `background`/`color`/`font` 会被丢掉。
 **影响**：不改的话窗口底色 / 文字色 / 字体**一条都不生效**（落到库默认色）。
 **副作用（已如实标注）**：core-ui **无 CSS 属性继承**，所以 `.root` 上的 `color` 不会传给子控件 → 见 §2.4。
 
@@ -98,7 +103,8 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 
 其余有文字的元素（`.app-title` / `.status-segment` / `.preview-hint` / `.preview-state` / `.row`）原本就有 `color` 规则，只做 token 改名。
 
-> 库默认文字色是 `contentText = #424242`（light，`theme.h` grey::g26），与项目的 `--app-text`（#1B1B1B）差一档多 —— 不补色会明显偏灰。
+> 库默认文字色是 `theme::kBtnText()` = **`#242424`**（light，grey::g14；`controls.cpp:61-68` 取值路径 `css.hasFg → customColor_ → theme::kBtnText()`），与项目的 `--app-text`（#1B1B1B）差一档多 —— 不补色会明显偏灰。
+> ⚠️ 我第一轮这里写的是 `contentText = #424242`（grey::g26），**数字错了**（QA 第二轮指出）：那是 `theme::Current().contentText`（dark = `#D6D6D6` / grey::g84），但 LabelWidget 实际走的是 `kBtnText()`。结论方向不变，数字已更正。
 
 ### 2.5 行容器补 `align-items: center`
 
@@ -148,57 +154,57 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 
 | # | 原标签 | 原:行 | 现标签 | 现:行 | 取舍理由 | 影响面 |
 |---|---|---|---|---|---|---|
-| 1 | `<vbox>` | 45 | `<div class="root">` | 140 | VBox 无对应标签；`<div>` 默认 column = 原 `<vbox>` 语义 | core-ui：同为 VBox。Rust：根节点 id 无（原本也无） |
-| 2 | `<hbox id="titlebar_host">` | 46 | `<div id="titlebar_host" class="titlebar">` | 141 | 横排靠 CSS：`.titlebar` 补 `flex-direction: row` | core-ui：VBox→HBox。Rust：id 不变，句柄照常取 |
-| 3 | `<text class="app-title">` | 47 | `<span class="app-title">tabbed_files</span>` | 142 | 标题栏应用名，短、单行、不占满 → `<span>`（inline 不 stretch）；加 `white-space: nowrap` | core-ui：LabelWidget(inline)。Rust：原本无 id，不影响 |
-| 4 | `<text-input id="global_search">` | 48 | `<input id="global_search">` | 143 | 标签无对应控件；`<input>` → TextInputWidget | core-ui：VBox(空盒)→TextInputWidget。Rust：id 不变 |
-| 5 | `<hbox id="tab_host">` | 50 | `<div id="tab_host" class="tabbar">` | 145 | 同 #2 | 同上 |
-| 6 | `<label id="tab_placeholder">` | 51 | `<label id="tab_placeholder" class="tab-placeholder">…</label>` | 146 | **原就是 `<label>`，保留**；只补 class 拿颜色 + 内部文本 | core-ui：不变。Rust：id 不变 |
-| 7 | `<separator class="divider">` | 53 | `<div class="divider" />` | 148 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token。Rust：无 id |
-| 8 | `<hbox id="command_host">` | 54 | `<div id="command_host" class="commandbar">` | 149 | 同 #2 | 同上 |
-| 9 | `<label id="nav_hint">` | 55 | `<label id="nav_hint" class="nav-hint">…</label>` | 150 | **原就是 `<label>`，保留**；补 class 拿颜色 | 同上 |
-| 10 | `<separator class="divider">` | 57 | `<div class="divider" />` | 152 | 同 #7 | 同上 |
-| 11 | `<hbox id="address_host">` | 58 | `<div id="address_host" class="addressbar">` | 153 | 同 #2 | 同上 |
-| 12 | `<panel id="breadcrumb">` | 59 | `<div id="breadcrumb" class="breadcrumb" />` | 154 | `<panel>` 无对应控件 → `<div>`（column） | core-ui：VBox→VBox。Rust：id 不变 |
-| 13 | `<text-input id="address">` | 60 | `<input id="address">` | 155 | 同 #4 | 同上 |
-| 14 | `<text-input id="search">` | 61 | `<input id="search">` | 156 | 同 #4 | 同上 |
-| 15 | `<separator class="divider">` | 63 | `<div class="divider" />` | 158 | 同 #7 | 同上 |
-| 16 | `<hbox id="infobar_host">` | 64 | `<div id="infobar_host" class="infobar" />` | 159 | 同 #2 | 同上 |
-| 17 | `<hbox class="main-area">` | 65 | `<div class="main-area">` | 160 | 同 #2 | 同上 |
-| 18 | `<panel id="nav_host">` | 66 | `<div id="nav_host" class="nav-host" />` | 161 | 同 #12 | 同上；见 §5 R5（Rust 自绘挂载点） |
-| 19 | `<vseparator class="divider">` | 67 | `<div class="vsep" />` | 162 | `<Separator>` 只有水平形态（`controls.h:200`），竖线用 1px 宽 div：`width:1px; background:var(--app-divider); align-self:stretch; flex-shrink:0` | core-ui：VBox(空盒)→1px 竖条。Rust：无 id，无影响 |
-| 20 | `<panel id="list_host">` | 68 | `<div id="list_host" class="list-host" />` | 163 | 同 #12 | 同上；见 §5 R5 |
-| 21 | `<vseparator class="divider">` | 69 | `<div class="vsep" />` | 164 | 同 #19 | 同上 |
-| 22 | `<panel id="preview_host">` | 70 | `<div id="preview_host" class="preview-host" />` | 165 | 同 #12 | 同上 |
-| 23 | `<separator class="divider">` | 72 | `<div class="divider" />` | 167 | 同 #7 | 同上 |
-| 24 | `<hbox id="status_host">` | 73 | `<div id="status_host" class="statusbar">` | 168 | 同 #2 | 同上 |
-| 25-30 | `<text id="status_*" class="status-segment">` ×6 | 74-79 | `<span id="status_*" class="status-segment" />` ×6 | 169-174 | 状态栏片段，短、单行、由 Rust 运行时填字 → `<span>`；配 `white-space: nowrap` 防长值折行 | core-ui：VBox(空盒)→LabelWidget(inline)。Rust：id 不变，`ui_label_set_text` 可用 |
+| 1 | `<vbox>` | 45 | `<div class="root">` | 151 | VBox 无对应标签；`<div>` 默认 column = 原 `<vbox>` 语义 | core-ui：同为 VBox。Rust：根节点 id 无（原本也无） |
+| 2 | `<hbox id="titlebar_host">` | 46 | `<div id="titlebar_host" class="titlebar">` | 152 | 横排靠 CSS：`.titlebar` 补 `flex-direction: row` | core-ui：VBox→HBox。Rust：id 不变，句柄照常取 |
+| 3 | `<text class="app-title">` | 47 | `<span class="app-title">tabbed_files</span>` | 153 | 标题栏应用名，短、单行、不占满 → `<span>`（inline 不 stretch）；加 `white-space: nowrap` | core-ui：LabelWidget(inline)。Rust：原本无 id，不影响 |
+| 4 | `<text-input id="global_search">` | 48 | `<input id="global_search">` | 154 | 标签无对应控件；`<input>` → TextInputWidget | core-ui：VBox(空盒)→TextInputWidget。Rust：id 不变 |
+| 5 | `<hbox id="tab_host">` | 50 | `<div id="tab_host" class="tabbar">` | 156 | 同 #2 | 同上 |
+| 6 | `<label id="tab_placeholder">` | 51 | `<label id="tab_placeholder" class="tab-placeholder">…</label>` | 157 | **原就是 `<label>`，保留**；只补 class 拿颜色 + 内部文本 | core-ui：不变。Rust：id 不变 |
+| 7 | `<separator class="divider">` | 53 | `<div class="divider" />` | 159 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token。Rust：无 id |
+| 8 | `<hbox id="command_host">` | 54 | `<div id="command_host" class="commandbar">` | 160 | 同 #2 | 同上 |
+| 9 | `<label id="nav_hint">` | 55 | `<label id="nav_hint" class="nav-hint">…</label>` | 161 | **原就是 `<label>`，保留**；补 class 拿颜色 | 同上 |
+| 10 | `<separator class="divider">` | 57 | `<div class="divider" />` | 163 | 同 #7 | 同上 |
+| 11 | `<hbox id="address_host">` | 58 | `<div id="address_host" class="addressbar">` | 164 | 同 #2 | 同上 |
+| 12 | `<panel id="breadcrumb">` | 59 | `<div id="breadcrumb" class="breadcrumb" />` | 165 | `<panel>` 无对应控件 → `<div>`（column） | core-ui：VBox→VBox。Rust：id 不变 |
+| 13 | `<text-input id="address">` | 60 | `<input id="address">` | 166 | 同 #4 | 同上 |
+| 14 | `<text-input id="search">` | 61 | `<input id="search">` | 167 | 同 #4 | 同上 |
+| 15 | `<separator class="divider">` | 63 | `<div class="divider" />` | 169 | 同 #7 | 同上 |
+| 16 | `<hbox id="infobar_host">` | 64 | `<div id="infobar_host" class="infobar" />` | 170 | 同 #2 | 同上 |
+| 17 | `<hbox class="main-area">` | 65 | `<div class="main-area">` | 171 | 同 #2 | 同上 |
+| 18 | `<panel id="nav_host">` | 66 | `<div id="nav_host" class="nav-host" />` | 172 | 同 #12 | 同上；见 §5 R5（Rust 自绘挂载点） |
+| 19 | `<vseparator class="divider">` | 67 | `<div class="vsep" />` | 173 | `<Separator>` 只有水平形态（`controls.h:200`），竖线用 1px 宽 div：`width:1px; background:var(--app-divider); align-self:stretch; flex-shrink:0` | core-ui：VBox(空盒)→1px 竖条。Rust：无 id，无影响 |
+| 20 | `<panel id="list_host">` | 68 | `<custom id="list_host" class="list-host" />` | 174 | **架构裁定（第三轮）**：列表由 Rust 自绘，宿主必须是 `<custom>` —— `ui_custom_on_draw` 内部是 `As<ui::CustomWidget>(w)`，对 `<div>` 会**静默 no-op**；且运行时 `ui_custom()` 造的控件没有 CSS 级联结果 → 无 flex/width/height → 尺寸 0 → 列表区空白。`<custom>` 则「CSS width/height 走 ApplyCommonStyle 自然生效」（`widget_factory.cpp:1114-1118`）→ `.list-host { flex: 1 }` 生效 | core-ui：VBox→CustomWidget（空的自绘画布）。Rust：id 不变，`ui_page_on_widget_mount(page,"list_host",…)` 取句柄 |
+| 21 | `<vseparator class="divider">` | 69 | `<div class="vsep" />` | 175 | 同 #19 | 同上 |
+| 22 | `<panel id="preview_host">` | 70 | `<div id="preview_host" class="preview-host" />` | 176 | 同 #12 | 同上 |
+| 23 | `<separator class="divider">` | 72 | `<div class="divider" />` | 178 | 同 #7 | 同上 |
+| 24 | `<hbox id="status_host">` | 73 | `<div id="status_host" class="statusbar">` | 179 | 同 #2 | 同上 |
+| 25-30 | `<text id="status_*" class="status-segment">` ×6 | 74-79 | `<span id="status_*" class="status-segment" />` ×6 | 180-185 | 状态栏片段，短、单行、由 Rust 运行时填字 → `<span>`；配 `white-space: nowrap` 防长值折行 | core-ui：VBox(空盒)→LabelWidget(inline)。Rust：id 不变，`ui_label_set_text` 可用 |
 
 ### 3.2 `assets/preview.uix`
 
 | # | 原标签 | 原:行 | 现标签 | 现:行 | 取舍理由 | 影响面 |
 |---|---|---|---|---|---|---|
-| 1 | `<vbox>` | 20 | `<div class="root">` | 69 | 同 main #1 | 同上 |
-| 2 | `<hbox class="preview-toolbar">` | 21 | `<div class="preview-toolbar">` | 70 | 横排靠 `.preview-toolbar { flex-direction: row; align-items: center; }` | core-ui：VBox→HBox |
-| 3 | `<text id="preview_title">` | 22 | `<span id="preview_title" class="preview-title">预览</span>` | 71 | 工具条标题，短、单行 → `<span>` | core-ui：VBox→LabelWidget(inline)。Rust：id 不变 |
-| 4 | `<separator />` | 24 | `<div class="divider" />` | 73 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
-| 5 | `<panel id="preview_body">` | 25 | `<div id="preview_body" class="preview-body" />` | 74 | `<panel>` → `<div>` | core-ui：VBox→VBox。Rust：id 不变 |
-| 6 | `<text id="preview_hint">` | 26 | `<label id="preview_hint" class="preview-hint">…</label>` | 75 | 提示行需要**占满宽度并可换行**（Rust 写入的通道名可能较长）→ `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block/stretch)。Rust：id 不变 |
-| 7 | `<text id="preview_channel">` | 27 | `<label id="preview_channel" class="preview-hint" />` | 76 | 同 #6 | 同上 |
-| 8 | `<text id="preview_size">` | 28 | `<label id="preview_size" class="preview-hint" />` | 77 | 同 #6 | 同上 |
-| 9 | `<text id="preview_state">` | 29 | `<label id="preview_state" class="preview-state" />` | 78 | 状态行需占满宽度 → `<label>` + `display: block` | 同上 |
+| 1 | `<vbox>` | 20 | `<div class="root">` | 77 | 同 main #1 | 同上 |
+| 2 | `<hbox class="preview-toolbar">` | 21 | `<div class="preview-toolbar">` | 78 | 横排靠 `.preview-toolbar { flex-direction: row; align-items: center; }` | core-ui：VBox→HBox |
+| 3 | `<text id="preview_title">` | 22 | `<span id="preview_title" class="preview-title">预览</span>` | 79 | 工具条标题，短、单行 → `<span>` | core-ui：VBox→LabelWidget(inline)。Rust：id 不变 |
+| 4 | `<separator />` | 24 | `<div class="divider" />` | 81 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
+| 5 | `<panel id="preview_body">` | 25 | `<div id="preview_body" class="preview-body" />` | 82 | `<panel>` → `<div>` | core-ui：VBox→VBox。Rust：id 不变 |
+| 6 | `<text id="preview_hint">` | 26 | `<label id="preview_hint" class="preview-hint">…</label>` | 83 | 提示行需要**占满宽度并可换行**（Rust 写入的通道名可能较长）→ `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block/stretch)。Rust：id 不变 |
+| 7 | `<text id="preview_channel">` | 27 | `<label id="preview_channel" class="preview-hint" />` | 84 | 同 #6 | 同上 |
+| 8 | `<text id="preview_size">` | 28 | `<label id="preview_size" class="preview-hint" />` | 85 | 同 #6 | 同上 |
+| 9 | `<text id="preview_state">` | 29 | `<label id="preview_state" class="preview-state" />` | 86 | 状态行需占满宽度 → `<label>` + `display: block` | 同上 |
 
 ### 3.3 `assets/about.uix`
 
 | # | 原标签 | 原:行 | 现标签 | 现:行 | 取舍理由 | 影响面 |
 |---|---|---|---|---|---|---|
-| 1 | `<vbox>` | 14 | `<div class="root">` | 54 | 同 main #1 | core-ui：VBox→VBox |
-| 2 | `<text class="heading">` | 15 | `<label class="heading">…</label>` | 55 | 标题虽短，但按「占满宽度」语义统一用 `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block) |
-| 3 | `<text class="row">`（首条） | 16 | `<label class="row">…</label>` | 56 | 条目是长句（最长达 40+ 汉字），**必须占满宽度才会折行**；若保持 inline，宽度=自然文字宽度 → 横向溢出窗口而不换行 | 同上 |
-| 4 | `<separator />` | 17 | `<div class="divider" />` | 57 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
-| 5 | `<text class="row">` ×10 | 18-27 | `<label class="row">…</label>` ×10 | 58-67 | 同 #3 | 同上 |
-| 6 | `<separator />` | 28 | `<div class="divider" />` | 68 | 同 #4 | 同上 |
-| 7 | `<text class="row">`（致谢） | 29 | `<label class="row">…</label>` | 69 | 同 #3 | 同上 |
+| 1 | `<vbox>` | 14 | `<div class="root">` | 59 | 同 main #1 | core-ui：VBox→VBox |
+| 2 | `<text class="heading">` | 15 | `<label class="heading">…</label>` | 60 | 标题虽短，但按「占满宽度」语义统一用 `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block) |
+| 3 | `<text class="row">`（首条） | 16 | `<label class="row">…</label>` | 61 | 条目是长句（最长达 40+ 汉字），**必须占满宽度才会折行**；若保持 inline，宽度=自然文字宽度 → 横向溢出窗口而不换行 | 同上 |
+| 4 | `<separator />` | 17 | `<div class="divider" />` | 62 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
+| 5 | `<text class="row">` ×10 | 18-27 | `<label class="row">…</label>` ×10 | 63-72 | 同 #3 | 同上 |
+| 6 | `<separator />` | 28 | `<div class="divider" />` | 73 | 同 #4 | 同上 |
+| 7 | `<text class="row">`（致谢） | 29 | `<label class="row">…</label>` | 74 | 同 #3 | 同上 |
 
 ### 3.4 `<text>` → `<span>` / `<label>` 的逐个取舍原则（25 处）
 

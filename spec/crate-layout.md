@@ -270,8 +270,10 @@ accent=#3971EC source=default(library)
 **`core-ui-revision.txt` 的消费点（唯一事实来源）：**
 
 1. CI 的 `actions/checkout` → 精确 ref 检出 core-ui 源码；
-2. CI 打包 → 写 `core-ui.dll.revision` 戳记（🔴 **当前实现未做**，见 `spec/ci-contract.md` §3.1）；
-3. `zsdesk-coreui/build.rs` → 固化为 `ZSCOREUI_CORE_UI_REVISION`；
+2. `zsdesk-coreui/build.rs` → 固化为 `ZSCOREUI_CORE_UI_REVISION`，**并在编译期写出戳记**
+   `target/<profile>/core-ui.dll.revision`（口径「甲：Rust 产出」）；
+3. CI 打包 → **只校验**包内戳记 == `packaging/core-ui-revision.txt`（**不自己写戳记**，
+   否则出现两个来源 → 运行时比对失去意义；见 `spec/ffi-core-ui.md` §5.5）；
 4. CI 门禁 S8 → 比对绑定符号与该 revision 的 `include/ui_core.h`。
 
 ---
@@ -334,7 +336,7 @@ accent=#3971EC source=default(library)
 | **S8** | **绑定面 vs 导出表** | 绑定层声明的符号 ⊆ S7 实测集合；必需∩可选=∅；必需不含 12 个「本机独有」符号 | 改绑定 | `python3 scripts/check-coreui-api.py` |
 | **S9** | **crate 依赖无环** | `cargo metadata` 解析出的依赖图有环 | 修正 | `python3 scripts/gates/check_crate_dag.py` |
 | **S10** | **FFI 层无业务依赖** | `zsdesk-coreui/Cargo.toml` 含指向业务 crate 的 path 依赖 | 修正 | 同上 |
-| **S13** | **token 不撞名** | `assets/*.uix` / `themes.json` 不得用 17 个旧 token 名，不得自定义 `--app-accent` | 改资源 | 见 `docs/12-UIX-TAG-FIX.md` §4.3 |
+| **S13** | **token 不撞名** | 不得定义**库 token 全集 34 个**（含 `--accent`）；**`.uix`** 不得定义 `--app-accent`；**`themes.json` 允许** `--app-accent`（D14 的回退源值，Rust **不得**把它注入 `:root`）；`.uix` 不得 `var(--app-accent)` | 改资源 | 见 `docs/12-UIX-TAG-FIX.md` §4.3 + `spec/ffi-core-ui.md` §5.6.1 |
 
 **首次基线**：Phase 3 开工前跑 `python3 scripts/gates/verify.py --phase 3`，
 把结果落盘。**没有基线，后面「改坏了」无法判定。**

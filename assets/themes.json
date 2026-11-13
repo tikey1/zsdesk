@@ -4,7 +4,13 @@
   "revision": {
     "date": "2026-11-13",
     "reason": "core-ui 库自带 34 个 CSS 变量 token（含 --bg / --accent / --sidebar-bg），同名时用户 :root 值虽在首次加载优先，但 ui_theme_set_mode 切深浅色时库的 RebuildThemeVars 会把这 34 个键 erase 后重写，用户值被清空 → 界面颜色突变。",
-    "decision": "全部项目 token 加 --app- 前缀，与库 token 完全不撞名；accent 保留 --app-accent 作为唯一源值，由 Rust 调 ui_theme_set_accent_hex() 写进库 token --accent，使库自绘控件（按钮 / 焦点环 / 滑块）与 .uix 自绘区域用同一个颜色。",
+    "decision": "全部项目 token 加 --app- 前缀，与库 token 完全不撞名。accent 是唯一的例外：它**不自定义**，由 Rust 侧读系统强调色后调 ui_theme_set_accent_hex() 写入【库 token】--accent；.uix 里一律读 var(--accent)（不要读 var(--app-accent)），以保证库自绘控件（按钮 / 焦点环 / 滑块）与 .uix 自绘区域同色。--app-accent 仅作【读不到系统色时的回退源值】。",
+    "accent_source": {
+      "primary": "系统强调色：Rust 读注册表 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\AccentColor（DWORD，**BGR 序**，需转 hex）→ ui_theme_set_accent_hex()",
+      "fallback": "读不到系统色时用本文件的 --app-accent（浅 #2563EB / 深 #60A5FA）",
+      "note": "core-ui 全仓无 GetSysColor / UISettings / AccentColor —— 它的品牌色是内置调色板，**根本不读系统强调色**（theme.h:446-455 的 SetAccent 只接受外部传入值）→ 「跟随系统」只能由 Rust 实现。已记为 D14。",
+      "order": "ui_theme_set_mode() 必须先于 ui_theme_set_accent_hex() —— set_mode 会用**当前**的 accent override 重新派生，反了就拿到上一次的。"
+    },
     "inject": "Rust 在 ui_page_load_string 之前，把本文件的键值拼成一段 ':root { --app-xxx: #xxxxxx; ... }' 并注入 .uix 源码字符串 —— 但必须注入到 <style> 块【内部】（紧跟 <style> 开头），绝不能放在源码顶层。core-ui 无运行时替换 CSS 变量的 C API（include/ui_core.h 内无相关符号）；:root 是自定义属性唯一被采集的位置（cascade.h:45，非 :root 级自定义属性被 cascade.cpp:134 忽略）；而放在源码顶层会被 sfc_parser.cpp:260-266 判为 'unexpected content at top level' → SFC parse failed → 整页不加载。",
     "inject_failure_modes": [
       "顶层注入 → SFC parse failed → 一个窗口都出不来（报错信息不像标签问题，极易误判）",

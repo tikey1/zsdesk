@@ -38,8 +38,13 @@
          </window> → SFC parse failed → 整页不加载（不是白屏局部缺失）。
       2. .uix 的文本必须写在元素内部；text="..." 属性只对 <menu> 生效
          （上游 FirstPlainText 只读子文本节点）。所有 text="..." 改为内部文本。
-      3. window { ... } 选择器不匹配任何控件（<window> 是 SFC 外壳，不是控件，
-         模板根节点才是根控件）→ 该规则落到根节点 class="root"。
+      3. window { ... } 选择器**匹配不到任何节点** —— <window> 是 SFC 层面的
+         窗口配置标签，不产生任何 widget（sfc_parser.cpp:285-296 只把 attrs 存进
+         doc.windowAttrs），因此没有任何节点的 tag 是 window，整条规则命中 0 个。
+         → 必须显式给根 <div> 加 class="root"，再用 .root { ... }。
+         （另：:root 是伪类，在普通样式计算里被显式跳过 —— cascade.cpp:125
+          "Skip :root — those only define CSS vars" —— 所以 :root 块里只能放
+          CSS 变量，放 background/color/font 会被丢掉。）
       4. core-ui 无 CSS 属性继承（IsInheritedProperty 未被任何路径调用），
          所以颜色必须逐个 class 声明；本文件为每个有文字的元素补了 color。
       5. 行容器补 align-items: center —— 32/36/40/28px 的条内控件（输入框、
@@ -49,10 +54,20 @@
          永远不会被画出来，线条颜色写死 theme::kDivider()（light #D1D1D1 /
          dark #424242）。要让分隔线走项目 token --app-divider 必须用 div。
          上游 demo 同款做法：<div class="sep"/> + height:1 + background。
+      7. 列表宿主 <div id="list_host"> → <custom id="list_host">（架构裁定）：
+         列表由 Rust 侧 ui_custom_on_draw 自绘，而 ui_custom_on_draw 内部是
+         As<ui::CustomWidget>(w) —— 对 <div> 宿主调用会静默 no-op（不报错、
+         不生效）；且运行时 ui_custom() 造出来的控件没有 CSS 级联结果，
+         无 flex/width/height → 在 flex 容器里尺寸 0 → 列表区空白。
+         写成 <custom> 后，widget_factory.cpp:1114-1118 明确「CSS width/height
+         走 ApplyCommonStyle 自然生效」→ .list-host { flex: 1 } 生效。
+         与 D-15 相容：<custom> 是空的自绘画布，「行」仍全部由 Rust 画。
 
     三、已知遗留（须真机确认，见 docs/13-UIX-FIRST-RENDER-CHECKLIST.md）
-      · core-ui 不支持 border-bottom：.tab-active 的 2px accent 指示条
-        只能由 Rust 自绘，或在 .uix 里用 2px 高的 <div> 实现。
+      · 标签选中态的 2px accent 指示条（docs/07 §2）**已从 .uix 删除**：
+        core-ui 不支持 border-bottom，且该 class 没有任何元素使用、还会与
+        --app-* 混用库 token。指示条由 Rust 自绘，或在 .uix 里用 2px 高的
+        <div> 实现（见 docs/12 §5 R6）。
       · font-family 对普通 LabelWidget 不生效（仅 SVG 文本读取该属性），
         实际字体由 Rust 调 ui_theme_set_default_font / ui_theme_set_cjk_font
         决定；.root 上的声明仅作设计记录。
@@ -91,17 +106,10 @@
   .tabbar { height: 36px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
   .tab-placeholder { color: var(--app-text); white-space: nowrap; }
 
-  /* ↓↓↓ 以下三条是「Rust 自绘参照规范」，当前没有任何元素引用它们 ↓↓↓
+  /* ↓↓↓ 以下两条是「Rust 自绘参照规范」，当前没有任何元素引用它们 ↓↓↓
      标签条 / 命令栏由 Rust 侧自绘（docs/07 §3），core-ui 没有运行时设置
-     class 的 C API，所以这三类不会由 .uix 渲染 —— 它们记录的是绘制尺寸与
-     颜色口径，供 src/ui/tabbar.rs / toolbar.rs 实现时对齐。
-     · border-bottom 在 core-ui 不被支持（仅 border / border-width /
-       border-color），2px accent 指示条须由 Rust 自绘或用 2px 高的 <div>。
-     · var(--accent) 是【库 token】（随 ui_theme_set_mode 切换），与其余
-       --app-*（不随主题切换）不是一个命名空间，这里是刻意的：指示条应跟随
-       系统主题。 */
-  .tab-active { color: var(--app-text); border-bottom: 2px solid var(--accent); }
-
+     class 的 C API，所以这两类不会由 .uix 渲染 —— 它们记录的是绘制尺寸口径，
+     供 src/ui/tabbar.rs / toolbar.rs 实现时对齐。 */
   /* 命令栏 40px */
   .commandbar { height: 40px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
   .cmd-button { width: 32px; height: 32px; }   /* Rust 自绘参照，见上 */
@@ -163,7 +171,7 @@
     <div class="main-area">
       <div id="nav_host" class="nav-host" />
       <div class="vsep" />
-      <div id="list_host" class="list-host" />
+      <custom id="list_host" class="list-host" />
       <div class="vsep" />
       <div id="preview_host" class="preview-host" />
     </div>

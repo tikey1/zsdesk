@@ -803,3 +803,107 @@ PASS —— 真实文字元素的对比度全部 ≥ 4.5:1，间距取值全部�
 | 5 | 数字类断言**必须自己实测** | 不得凭印象写数字（见 §8.8 的两条撤回） |
 
 ---
+
+## 11. 第三轮复核（前端回应后的验收）
+
+> 依据：前端在 `docs/12` §8「对 QA 第一轮复核的逐条回应」中声明 3 阻塞 + 7 重要 + 5 建议全部处理。
+> QA 逐条**复跑门禁 + 机械比对 + 上游源码核对**后的验收结果。§1–§10 未改动。
+
+### 11.1 已验收（8 项，机械复核通过）
+
+| 项 | 验收证据（本次实跑） |
+|---|---|
+| **B1** 注入位置 | ✅ `assets/themes.json` 新增 `revision.inject_failure_modes`（**3 条失败模式**：顶层注入 → SFC parse failed / 完全没注入 → 静默回落库色 / 注入晚于 load → 同上）；`inject` 已写明「必须注入到 `<style>` 块【内部】…绝不能放在源码顶层」；`docs/13` §0 新增 **4 条【P0】自查**（位置 / 确实注入 / 时序 / 句柄重取）✅ |
+| **B2** `<separator>` | ✅ **三个文件真实 `<separator>` 元素归零**（剥 HTML + CSS 注释后 main **0** / preview **0** / about **0**；文件里剩下的 1 处/文件全在**变更记录注释**与 CSS 说明注释里）。`<div class="divider">` = 4 / 1 / 2 = **7 处** ✅ |
+| **B3** 输出复现 | ✅ `docs/12` §6 已重写为仓库脚本的真实输出 + 断言清单 + 判定标准；实跑 `uix_tag_check.py` → EXIT=0，输出与文档一致 ✅ |
+| **I1** 计数 | ✅ `docs/11` §2 已是 main.uix 单文件实测口径；`docs/12` §0 补了「三文件合计 46」与「模板体 30/9/16」 ✅ |
+| **I2** M01/M06 | ✅ M01 已结案（QA 回填）；M06 前端已结案，结论与 QA 独立判定逐条一致 ✅ |
+| **I3** 句柄失效 | ✅ `docs/12` §4.4 新增「重建页面的副作用」三步（destroy 旧 page → 重取 27 个句柄 → 重挂回调）；`themes.json` 的 `revision.switch` 同步；`docs/13` §0 加了【P0】自查第 4 条 ✅ |
+| **I5** 对比度口径 | ✅ **55 个真实文字元素 × 2 主题 = 110 对**，最低 **5.78:1 (light) / 6.75:1 (dark)** —— 与 QA 独立复算**完全一致**；G13 间距 0 处越界 ✅ |
+| **I6** 入库 | ✅ `git add scripts/gates/ docs/12 docs/13` 已执行（前端自述 status 为已暂存）—— 未经 QA 独立核验（**本轮不执行 git 命令**） |
+| **S1** 口径统一 | ✅ `uix_tag_check.py` 已改成「**模板体元素 30 个**」（main 30 / preview 9 / about 16），与 `docs/11` / `docs/12` / `docs/14` 一致 ✅ |
+
+**额外机械核验（本次 QA 独立跑）**：
+- **ID 保全**：main **21/21**、preview **6/6**、about **0/0** —— 丢失 0、改名 0、新增 0 ✅
+- **模板体元素数**：30 / 9 / 16 —— 与改前一致 ✅
+- **无新增缺陷**：`qa_uix_verify.py` 的 WARN 集合与上一轮**完全相同**（8 条：border-bottom / font-family ×3 / 死 class ×5 / font-weight ×2），**没有因本轮改动引入任何新问题** ✅
+- **前端引用的上游佐证 —— 部分属实**：✅ `demo/ui_demo.uix` 确有 `<div class="sep"/>`（实测 **19 处**）+ `:203` 的 `.sep { height: 1; background: var(--border-subtle); }` → **这是支持 B2 改法的强证据**，上游作者自己也用 `div + background` 做分隔线 ✅
+- ✅ **前端对 `ui_page_reload` 的判断正确** —— QA 独立核对 `page_api.cpp:565-577`：reload 走的是 `CompileAndAttachPage(*e, e->sourceText)`（或重读 `e->sourcePath`）→ **改不了 palette**，且重新 attach → **句柄同样失效** ✅
+
+### 11.2 ⛔ X-1 · I4 裁决**未落地**（执行与裁决不一致 —— 需 team-lead 拍板）
+
+**裁决内容**（team-lead 第二轮决策）：采纳选项 (c) —— `.preview-title` / `.heading` 的 `font-weight: 600` **删掉**，字号按 `docs/07` 提到 **14px**，层级靠颜色区分；`docs/13` 的 F3 与 F6 一并改成「**14px、不加粗、靠颜色做层级**」。
+
+**前端实做**（QA 本次实跑）：
+
+| 位置 | 现状 | 与裁决的差距 |
+|---|---|---|
+| `assets/preview.uix:52` | `.preview-title { padding: 8px; **font-weight: 600**; color: var(--app-text); white-space: nowrap; }` | `font-weight: 600` **未删**；该规则本就无 `font-size` → **未提 14px** |
+| `assets/about.uix:44` | `.heading { display: block; padding: 12px; **font-size: 16px**; **font-weight: 600**; color: var(--app-text); }` | `font-weight: 600` **未删**；字号仍是 **16px**（未提 14px） |
+| `docs/13:134` F3 | 「16px、**不加粗**（`font-weight: 600` 在 core-ui 是空声明，见 F6）」 | 矛盾**已消除** ✅，但不是裁决要的「**14px**、不加粗、靠颜色做层级」 |
+| `docs/13:137` F6 | 仍写「……**是待裁决项**」 | **未按裁决更新** |
+| `docs/13:197` §9 第 8 条 | 仍写「**需要设计师裁决的是「要不要改」**」 | **未按裁决更新** |
+
+前端自述：「**R8 三选一保持未裁决，等设计师**」。
+
+**机器信号**：`qa_uix_verify.py` 的两条 `font-weight: 600` WARN **仍在**（`assets/preview.uix` / `assets/about.uix`）—— 这正好是「裁决未落地」的自动检测。
+
+> **需要 team-lead 拍板**（QA 不越权裁决、也不替前端改）：
+> **(甲) 补落地 (c)** —— 删两处 `font-weight: 600`、`.heading` 字号 16px→14px、`.preview-title` 补 `font-size: 14px`、`docs/13` F3/F6/§9 第 8 条改成「已裁决采纳 (c) / 14px / 不加粗 / 靠颜色做层级」；
+> **(乙) 改裁决** —— 若 `docs/07` 的 16px 标题字号是硬约束，则 (c) 的「提到 14px」反而**降级**了标题（16→14 是变小），此时应改裁为「保持 16px、去掉 `font-weight: 600`、靠颜色做层级」。
+
+**✅ QA 已复核 `docs/07` 原文，(乙) 不成立 —— (甲) 是唯一正解**：
+
+`docs/07-UI-DESIGN-WINUI3.md:95` 逐字：
+> **字体**：Segoe UI Variable（Win11）/ Segoe UI（Win10），正文 13 px、次要 12 px、**标题 14 px**；**字重仅 400 / 500**。中文回退 Microsoft YaHei UI。
+
+⇒ **16px → 14px 不是「降级」，是「修正到用户自己的设计文档」** —— 现在 `.heading` 的 **16px 本身就违反 `docs/07` 的「标题 14 px」**。
+
+**两个标题的当前实际渲染字号**（QA 核对 `controls.h`：`LabelWidget::fontSize_` 默认 = `theme::kFontSizeNormal` = **14.0f**，`theme.h:584`）：
+
+| 元素 | 当前声明 | 实际渲染字号 | 与 `docs/07`「标题 14 px」 |
+|---|---|---|---|
+| `.preview-title`（`preview.uix:52`） | **无** `font-size` | 库默认 **14px** | ✅ **恰好符合**（但依赖库默认值，库一改就漂移 → 建议显式写 `font-size: 14px`） |
+| `.heading`（`about.uix:44`） | `font-size: 16px` | **16px** | ❌ **违反** |
+
+⇒ **(甲) 的具体动作**（可直接照做）：
+1. `assets/about.uix:44` `.heading`：`font-size: 16px` → **`font-size: 14px`**，并**删掉** `font-weight: 600`
+2. `assets/preview.uix:52` `.preview-title`：**删掉** `font-weight: 600`，并**显式补** `font-size: 14px`（别依赖库默认值）
+3. `docs/13:134` F3 → 「**14px、不加粗**，靠颜色做层级」；`docs/13:137` F6 + `:197` §9 第 8 条 → 「**已裁决采纳 (c)**」
+
+⇒ 落地后 `qa_uix_verify.py` 的两条 `font-weight: 600` WARN 会**同时消失**（机器信号闭环）。
+
+### 11.3 ⛔ X-2 · 前端引用的上游 demo 证据有一处事实错误
+
+| 前端说法 | QA 实测 | 判定 |
+|---|---|---|
+| 「`demo/ui_demo.uix:426` 等 **10 处**全是 `<div class="sep"/>`」 | `grep -c 'class="sep"'` = **19** 处 | 🟡 数字偏小（不影响结论） |
+| 「`<separator>` 在 demo 里**一次都没出现**」 | **3 处真实 `<separator/>`**：`demo/ui_demo.uix:663, 672, 687` | ❌ **不实** |
+| 「demo 用 `.sep { height: 1; background: var(--border-subtle); }`」 | ✅ `demo/ui_demo.uix:203` 逐字属实 | ✅ 成立 |
+
+**影响**：**不推翻 B2**（demo 那 3 处 `<separator/>` 仍然只能渲染成库色，与 §1 的结论一致），
+但会误导读者以为上游从不用 `<separator>`。建议改成：「demo 里 **19 处用 `<div class="sep"/>`** 做分隔线、另有 **3 处 `<separator/>`**（那 3 处只能是库色）」。
+
+### 11.4 ⛔ X-3 · `docs/11` 新写的 `ui_debug` 口径第二个数字不对
+
+| 口径 | 前端写在 `docs/11` 的 | QA 实测 | 判定 |
+|---|---|---|---|
+| 导出声明数 | 「71 个」 | `grep -c "UI_API.*ui_debug_"` = **71** | ✅ **正确** |
+| 全文出现次数 | 「全文出现该前缀 **73** 处含 2 处注释」 | 全文出现 **83 行**；唯一符号名 **72** 个 | ❌ **73 对不上任何一种口径** |
+
+建议改成：「**71 个导出声明**（`grep -c "UI_API.*ui_debug_"` = 71）；全文出现该前缀 **83 行**，其中唯一符号名 **72** 个（1 个仅见于注释）」。
+
+### 11.5 ⛔ X-4 · `themes.json` 的 `inject_failure_modes` 复制了 QA 指出的错数字
+
+`revision.inject_failure_modes` 第 2 条写：「……界面能出来但全是库默认色（纯白底 / **#424242** 文字 / #D1D1D1 分隔线）」
+
+→ **`#424242` 应为 `#242424`** —— `LabelWidget` 无 `color` 规则时用 `theme::kBtnText()`（`controls.cpp:61-68`）= **`#242424`**（grey::g14）。
+这正是 §8.9 已指出的那处错数字，**被原样复制进了新字段**。（`#D1D1D1` 分隔线那半句现在也要改：本轮分隔线已全改 `<div>`，深浅色下分别是 `--app-divider` 的 **#E0E0E0 / #3D3D3D**，不再是库色。）
+
+### 11.6 本轮未能核实的（诚实边界）
+
+- **`git add` 是否真的执行了** —— 按 team-lead 要求本轮**未执行任何 git 命令**，I6 的 status 属前端自述，**未经 QA 独立核验**。
+- **`docs/12` §8 的逐条回应内容是否与我的裁定一致** —— QA 只核了其中与机械可判项相关的部分（§8.1–§8.5 已列出）；散文部分未逐字校对。
+- **真机渲染** —— 仍未渲染验证；`docs/13` 真机清单**尚未执行**。
+
+---

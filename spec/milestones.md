@@ -105,6 +105,7 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | M1-6 | `IShellPropertyStore` 详细信息列 | `crates/zsdesk-windows/src/shell/properties.rs` |
 | M1-7 | 视图记忆 / 列宽 / 排序记忆 | `crates/zsdesk-app/src/storage.rs`（沿用上游 `window/view_memory.rs`） |
 | M1-8 | 核心 UI 迁移的第一批 `zsdesk-app` 重写（`window/mod.rs` / `paint.rs` / `input.rs` / `mouse_gestures.rs` / `wheel_input.rs`） | `crates/zsdesk-app/src/window/` |
+| M1-9 | **品牌色来源模块**（D14）：读注册表系统 `AccentColor`（BGR 序）→ 回退 `themes.json` 的 `--app-accent`；拼 `:root`（排除 `--app-accent`）+ 加载前自检 | `crates/zsdesk-windows/src/system/accent.rs`（**新增**）+ `crates/zsdesk-app/src/theme.rs` |
 
 > **首版只读**（D-15）：命令条不含新建 / 重命名 / 删除 / 剪贴板命令。
 
@@ -123,7 +124,16 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | V1.9 | **深浅色切换不突变**（D10 的 token 路线生效） | 截图对比 |
 | V1.10a | **页面用 `ui_page_load_string` 加载**（Rust 注入 `:root`）→ 证明 `.uix` 与 `themes.json` 在运行时被读到 | 打包缺资源时会立刻暴露 |
 | V1.10b | **`ui_theme_set_accent_hex` 被调用** → 自绘区蓝与按钮蓝一致（不撞成两种蓝） | 截图对比 |
+| **V1.11** | **启动日志打印生效的 accent 值与来源**：`accent=#RRGGBB source=system\|fallback(themes.json:light)\|default(library)`；与「设置 → 个性化 → 颜色」的强调色 hex **逐位对照一致** | 读启动日志 + 真机核对 |
+| **V1.12** | **`:root` 注入自检存在且 fail-fast**：故意把 `:root` 裸放在源码顶层 → **Rust 侧直接报错**（提示「`:root` 必须在 `<style>` 块内」），**不得**等到 core-ui 报 "SFC parse failed" | 单元测试（构造坏源码） |
 | V1.10 | 全部门禁（含新增的 S8/S9/S10）全绿 | CI |
+
+> **V1.1 的口径补充（D13）**：视觉对照**不包含** Mica / Acrylic 材质与高对比度模式 ——
+> core-ui **不提供**这两个入口（`DwmSetWindowAttribute` 只用于 `TRANSITIONS_FORCEDISABLED` 与圆角偏好，
+> `GetSysColor` / `UISettings` / `AccentColor` 全仓零命中）→
+> **这两项按「已知限制」处理，不作为验收门**（清单见 §8）。
+> 用户的 `docs/07-UI-DESIGN-WINUI3.md` §4 原文写的是「Win11 22H2+ **可选** Mica，
+> Win10 一律纯色回退；**不依赖** Acrylic / 模糊」→ 丢掉 Mica **不违背设计意图**。
 
 ### 2.3 可演示的动作
 
@@ -242,6 +252,7 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | **V3-10** | ★ **搜索后端不可用时必须自动回退**：Everything 未安装/未运行时 → 自动回退 **MFT/USN 索引 → 目录扫描**，且**功能仍可用**（搜得到结果），**不是**静默搜不出东西 | 人工（干净 VM，无 Everything）+ `zsdesk-app/src/fast_search/everything_runtime.rs` 的运行时探测 |
 | **V3-11** | ★ **UI 必须显示当前搜索后端**（Everything / MFT-USN / 目录扫描）—— 用户要能知道「为什么慢 / 为什么结果不一样」 | 截图 |
 | V3-12 | CI 侧：在**没有 Everything** 的 runner 上，搜索仍能返回结果 | CI（M3 冒烟） |
+| **V3-13** | ★ **已知限制清单随包交付**：`DELIVERY.md` 与 `README-FORK.md` **必须**写明 §8 的全部限制项（无障碍 / 材质 / 高对比度），**不得**只留在本仓库的 Spec 里 | 人工 + CI 打包内容检查 |
 
 ### 4.3 可演示的动作
 
@@ -312,7 +323,55 @@ pwsh scripts/package-portable.ps1 -StageDir stage -OutFile ZSDesk-<ver>-full-x64
 
 ---
 
-## 8. 关联文档
+## 8. ★ 已知限制清单（D13）—— **`DELIVERY.md` 与 `README-FORK.md` 的必填输入**
+
+> **用户 2026-11-13 拍板：接受降级并记录。**
+> 这份清单**必须**原样（可再加工措辞）出现在 **`DELIVERY.md`** 与 **`README-FORK.md`** 里，
+> **不得**只留在本仓库的 Spec / 台账里（验收项 **V3-13**）。
+
+### 8.1 实测依据（core-ui pinned revision 全仓 grep）
+
+| 查证对象 | 结果 |
+|---|---|
+| `GetSysColor` / `UISettings` / `AccentColor` | **零命中** → core-ui **不读系统色**（→ D14 由 Rust 侧读） |
+| `uia` / `accessibility` / `narrator`（`src/ui/widget.cpp`、`src/ui/ui_api.cpp`） | **零命中** → **无 UIA 桥接** |
+| `HighContrast` / `AppsUseLightTheme`（`src/ui/theme.h`） | **零命中** → **不感知系统高对比度** |
+| `DwmSetWindowAttribute`（`src/ui/ui_window.cpp`） | 只用于 `TRANSITIONS_FORCEDISABLED` 与圆角偏好 → **无 Mica / Acrylic 入口** |
+| `mica` / `acrylic` / `backdrop` | **零命中** |
+
+### 8.2 限制项（逐条写进交付文档）
+
+| # | 限制 | 影响 | 状态 |
+|---|---|---|---|
+| **L1** | **高对比度模式不支持** | 系统开启高对比度时，本程序**不会**自动改用系统色；自绘控件与自绘区域维持本程序自己的配色 | ❌ 不可实现（core-ui 无 UIA / 无系统色感知） |
+| **L2** | **读屏 / Narrator 不支持** | 屏幕阅读器**读不出**本程序的控件内容与状态 | ❌ 不可实现（同上） |
+| **L3** | **无 Mica / Acrylic 窗口材质** | 标题栏区域为**纯色**，不做半透明/模糊；Win10 与 Win11 表现一致 | ❌ 丢失（上游 zsdesk 自己用 DWM 实现 Mica，见 `crates/zsdesk-app/src/theme.rs:131-194`；换 core-ui 后不复存在） |
+| **L4** | 深色标题栏 / 系统圆角偏好 | core-ui 只暴露圆角偏好，不暴露系统材质 | ⚠️ 降级 |
+| **L5** | **系统强调色要靠 Rust 侧实现** | 「跟随系统 `AccentColor`」由 Rust 读注册表实现（§5.6.2 的 D14 契约）；读不到时回退 `themes.json` 的 `--app-accent` | ✅ 已设计（M1 落地） |
+
+### 8.3 为什么「丢掉 Mica」不违背用户设计意图
+
+用户原稿 `docs/07-UI-DESIGN-WINUI3.md` §4 原文：
+
+> 材质：Win11 22H2+ **可选** Mica（标题栏区域），Win10 一律纯色回退；**不依赖** Acrylic / 模糊（性能与兼容性）。
+
+→ Mica 在用户的设计里本来就是「**可选**」，且明确「**不依赖** Acrylic / 模糊」。
+换成 core-ui 后从「可选」变成「**没有**」，**不改变设计意图**，只是少了一档表现。
+
+同理，`docs/07` §7 的「高对比度模式：忽略 `--accent` 与材质，全部改用系统色」这一条
+→ 在 core-ui 下**无法实现**（L1），故**不作为验收门**，但**必须写进交付文档**，
+让用户在开启高对比度前知情。
+
+### 8.4 复评条件
+
+**若 core-ui 上游后续补上 UIA 桥接或系统材质入口（`DwmSetWindowAttribute` 的 Mica/Acrylic 支持、
+或 `UISettings`/`GetSysColor` 读取），则重新评估 L1~L4**，并同步更新：
+`DECISIONS.md`（D13）、本节、`DELIVERY.md`、`README-FORK.md`、以及 `docs/07` 对应条目。
+→ 跟踪方式：core-ui 上游版本升级时，重新跑 §8.1 的五组 grep（一次几分钟）。
+
+---
+
+## 9. 关联文档
 
 - `SPEC.md` —— 总览与索引
 - `spec/crate-layout.md` —— crate 划分与目录树

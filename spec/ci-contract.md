@@ -101,7 +101,7 @@ job package  needs: [rust, core-ui]
 |---|---|---|---|
 | 15 | **位数**：PE Machine == `0x8664` | `Verify core-ui.dll is a Windows x86-64 image` | ✅ |
 | 16 | **G2 revision 一致性**：DLL 版本资源 == pinned revision 的 `VERSION` | `Gate G2 — the DLL version must match the pinned revision` | ✅ |
-| 17 | **G2b 戳记**：打包写出 `core-ui.dll.revision`，运行时比对 | 打包拷 `app/target/release/core-ui.dll.revision`（**若存在**）→ 戳记由 Rust 侧 build.rs/构建产出 | 🟡 **戳记的产出方要定**（见 §5.2） |
+| 17 | **G2b 戳记**：戳记内容 == pinned revision（`packaging/core-ui-revision.txt`） | **产出方已定 = Rust 侧**（`crates/zsdesk-coreui/build.rs`，口径甲）→ CI **只校验**；**CI 现在还在自己写一份**（Gate G2 里 `Set-Content`，写到 `clang-cl-build/`，两行）→ **删掉它** | 🟡 **断言待加**（§4.2 / §4.6b） |
 | 18 | **S7 CRT 动态性**：导入表必须含 `MSVCP140.dll` + `VCRUNTIME140.dll` | `Gate S7 — core-ui.dll must link the dynamic VC++ runtime`（dumpbin 判定） | ✅ |
 | 19 | **S12 同目录**：`core-ui.dll` 与 exe 同目录 | `Gate S12` | ✅ |
 | 20 | **S7'-第一段**：CI 编出的 DLL 的 `ui_*` 导出集 vs `docs/05-COREUI-EXPORTS.txt`（567 个）；**判据按实测符号集**（PM 扫 pinned revision 全 `src/` 的 `UI_API` → 567，与本机 DLL 双向差集为空，仅 `ui_dialog` 例外）→ 断言「CI 产物的 `ui_*` 集 ⊇ 本机 567（允许 `ui_dialog` 缺）」且「差集 ⊆ {`ui_core_embed_binary`}」 | 未实现 | 🟡 **建议本版就加**（不需要绑定层落地） |
@@ -140,23 +140,38 @@ job package  needs: [rust, core-ui]
 **理由**：`clippy -D warnings` 是 Rust 侧唯一能机器判死的「unsafe 用错 / 错误转换」门禁；
 一直观察等于这道门禁不存在。**建议在 `build.yml` 里写一行注释标明收敛期限**，避免变成永久豁免。
 
-### 4.2 🟡 revision 戳记的**产出方**要定（G2b）
+### 4.2 ✅ revision 戳记的产出方 —— **已定：口径「甲：Rust 产出」（2026-11-13）**
 
 **现状**：打包步骤拷 `app/target/release/core-ui.dll.revision`（**若存在**）——
 即戳记由 **Rust 构建**产出，而不是由 CI 从 `packaging/core-ui-revision.txt` 直接写。
 
-**两种口径，二选一（必须一致）**：
+**两种口径（已选「甲」）**：
 
 | 口径 | 产出方 | 优点 | 缺点 |
 |---|---|---|---|
-| **甲：Rust 产出** | `crates/zsdesk-coreui/build.rs` 把 `packaging/core-ui-revision.txt` 的 SHA 固化成 `ZSCOREUI_CORE_UI_REVISION`，并**同时**在 `target/release/` 旁写一份 `core-ui.dll.revision` | 运行时比对的是**编译期固化的那个值**（`spec/ffi-core-ui.md` §5.5 机制），编译期与运行期天然一致 | build.rs 要写文件，跨平台要注意 |
-| **乙：CI 产出** | CI 从 `packaging/core-ui-revision.txt` 读 SHA，打包时写 `core-ui.dll.revision` | 简单直接 | 运行时要比对的必须是**同一个**值 —— Rust 侧得从 exe 同目录读戳记文件，而不是用编译期常量 |
+| **甲：Rust 产出 ✅ 已定** | `crates/zsdesk-coreui/build.rs` 把 `packaging/core-ui-revision.txt` 的 SHA 固化成 `ZSCOREUI_CORE_UI_REVISION`，并**同时**在 `target/release/` 旁写一份 `core-ui.dll.revision` | 运行时比对的是**编译期固化的那个值**（`spec/ffi-core-ui.md` §5.5 机制），编译期与运行期天然一致 | build.rs 要写文件（跨平台注意） |
+| ~~乙：CI 产出~~ | ~~CI 从 `packaging/core-ui-revision.txt` 读 SHA，打包时写~~ | 简单直接 | 运行时要比对的必须是**同一个**值 → Rust 侧得从 exe 同目录读文件，而不是用编译期常量 |
 
-**架构侧推荐：甲**（Rust 产出），CI 只负责**把戳记拷进包**。
-理由：`spec/ffi-core-ui.md` §5.5 的比对机制是「编译期固化的 `EXPECTED_REVISION` vs 旁置戳记」，
-**编译期常量才是权威**；若戳记由 CI 写，两者可能来自不同来源 → 比对失去意义。
-→ **契约要求**：戳记文件的内容必须 **== 编译期 `EXPECTED_REVISION`**；
-CI 侧加一条断言「打包进去的戳记 == `packaging/core-ui-revision.txt`」。
+**最终契约（逐字，运维照此改 `build.yml`）**：
+
+| 项 | 约定 |
+|---|---|
+| **谁写** | **Rust 侧** `crates/zsdesk-coreui/build.rs`；CI **不写** |
+| **何时** | build.rs 运行时（每次 `cargo build` / `cargo test`）→ 与 exe 天然同版本 |
+| **写什么** | revision SHA（40 位 hex）+ **一个 `\n`**；**无 BOM**；**只有一行**（版本号不进戳记） |
+| **写到哪** | `target/<profile>/core-ui.dll.revision`（**与 exe 同目录**）→ CI 打包拷的就是这个路径 |
+| **CI 做什么** | **只校验**：包内戳记（trim）== `packaging/core-ui-revision.txt`（trim）；不等 → **打包失败** |
+| **CI 要删的一步** | 现 Gate G2 里 `Set-Content ... "$expected`n<revision>"`（写 `core-ui/clang-cl-build/core-ui.dll.revision`，**两行**）→ **删掉**。两个来源 = 比对失去意义；且它不在 exe 同目录 |
+
+**为什么是 Rust 产出**：编译期常量 `EXPECTED_REVISION` 是**唯一权威来源**。
+若戳记由 CI 写，两者可能来自不同来源 → 比对失去意义。
+→ **契约要求**：戳记文件的内容必须 **== 编译期 `EXPECTED_REVISION`** == `packaging/core-ui-revision.txt`。
+
+> **⚠️ 前置条件**：CI 必须**真的编到 `zsdesk-coreui`**（`zsdesk-app` 依赖它，或 CI 额外跑
+> `cargo build --locked --release -p zsdesk-coreui`）—— 否则 build.rs 不跑 → 戳记不存在 →
+> 打包断言失败（**预期行为**：失败即停）。
+
+完整可粘贴的断言片段见 `spec/ffi-core-ui.md` §5.5。
 
 ### 4.3 🟡 S7' 导出面（CI 编出的 DLL vs 导出表）—— **两段，建议本版就加第一段**
 
@@ -214,10 +229,10 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 **加法（M0 落地后）**：CI 里加一步 —— 把 exe 与 `core-ui.dll` 复制到临时目录 →
 删掉 `core-ui.dll` → 运行 exe → **断言退出码非 0 且 stderr 含 `core-ui.dll`**。
 
-### 4.6b 🟡 戳记的**断言**（口径「甲：Rust 产出」）
+### 4.6b ✅ 戳记的**断言**（口径「甲：Rust 产出」）
 
 **契约**：戳记由 **Rust 侧 `crates/zsdesk-coreui/build.rs`** 在编译期写出
-（内容 = `packaging/core-ui-revision.txt` 的 SHA + 一个换行，无 BOM；
+（内容 = `packaging/core-ui-revision.txt` 的 SHA + 一个换行，无 BOM，**单行**；
 路径 = `target/<profile>/core-ui.dll.revision`，**与 exe 同目录**）。
 **CI 不自己写戳记**，只做**校验**：
 
@@ -232,7 +247,27 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 > 若 CI 也写一次戳记，就有两个来源 → 运行时比对失去意义。
 >
 > 打包步骤**不用改**：现在的实现已经拷 `app/target/release/core-ui.dll.revision`
-> —— build.rs 写到那里正好被拷进 ZIP；只需**再加一条内容断言**。
+> —— build.rs 写到那里正好被拷进 ZIP；只需**再加一条内容断言**
+> （可粘贴片段见 `spec/ffi-core-ui.md` §5.5）。
+>
+> **CI 要删的一步**：Gate G2 里现在那段 `Set-Content ... "$expected`n<revision>"`
+> （写到 `core-ui/clang-cl-build/core-ui.dll.revision`，**两行**）→ 按本契约删掉。
+>
+> **⚠️ 前置条件**：CI 必须编到 `zsdesk-coreui` 这个 crate，否则 build.rs 不跑 → 戳记不存在 →
+> 断言失败（**预期行为**：失败即停，不是「跳过」）。
+
+### 4.6c ★ 已知限制清单必须随包交付（D13）
+
+**这不是 CI 门禁，是交付物条款**（但它有一个可机械检查的形式）：
+
+| 项 | 约定 |
+|---|---|
+| **内容来源** | `spec/milestones.md` §8 的限制清单（L1~L5）—— **唯一权威**，本节只是引用 |
+| **必须出现在** | ① `DELIVERY.md`（交付说明）② `README-FORK.md`（fork 说明） |
+| **CI 侧可机械检查** | 打包时断言这两个文件**存在于包内**（若包内带文档）；或断言仓库里存在这两份文件且**包含关键词** `高对比度` 与 `Mica` |
+| **为什么** | L1~L3 是**用户会直接感知到的缺失**（开了高对比度没反应、读屏读不出、没有 Mica）→ 不写清楚就是「交付后才发现」 |
+
+> **验收项**：`spec/milestones.md` **V3-13**（M3 收口时人工 + 打包内容检查）。
 
 ### 4.6 一条**不属于 CI 但必须写进契约**的产品条款
 
@@ -369,7 +404,7 @@ cmake --build <core-ui>/clang-cl-build --target core-ui
 > **剩下的缺口集中在「机械门禁」这一层**（S7' 导出面 / S8 绑定面 / S9·S10 依赖方向 /
 > 静态门禁 / S13 token），它们**依赖绑定层与门禁脚本先落地**，因此不是 CI 的问题，
 > 而是**M1 的产出物**。
-> **另外两条要在 M1 前定**：clippy 的收敛期限（§4.1）、revision 戳记的产出方（§4.2）。
+> **另外两条要在 M1 前定**：clippy 的收敛期限（§4.1）、revision 戳记的**断言**（§4.2 —— 产出方已定：Rust 侧）。
 
 ---
 
@@ -389,7 +424,7 @@ cargo test --workspace --release --locked
 # ③ 产物侧（当前态已覆盖）
 #   - core-ui.dll 与 exe 同目录                    ✅ 已实现（Gate S12）
 #   - assets/ 四件套齐全                           ✅ 已实现
-#   - core-ui.dll.revision 戳记 == revision 文件     🟡 产出方待定（§4.2）
+#   - core-ui.dll.revision 戳记 == revision 文件     ✅ 产出方已定（Rust 侧，§4.2）｜断言待加
 #   - manifest 每个文件的 sha256 可复算             ✅ 已实现
 
 # ④ 关键错误流

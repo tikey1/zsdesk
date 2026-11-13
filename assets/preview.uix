@@ -31,7 +31,12 @@
       3. window { ... } 选择器不匹配任何控件 → 落到根节点 class="root"。
       4. core-ui 无 CSS 属性继承 → 每个有文字的 class 各自声明 color。
       5. .preview-toolbar 补 align-items: center（32px 条内标题垂直居中）。
-      6. <separator> → <div class="divider">：SeparatorWidget::OnDraw
+      6. 标题字重与字号（交付总监裁决 I4，采纳选项 (c)）：
+         .preview-title 删掉 font-weight: 600（core-ui 只认 bold/700，600 是
+         空声明；且 600 越了 docs/07 §4「字重仅 400/500」的上限），
+         补 font-size: 14px（docs/07 §4 规定标题 14px）——
+         层级改由【字号 + 颜色】承担（14px + --app-text）。
+      7. <separator> → <div class="divider">：SeparatorWidget::OnDraw
          （上游 controls.cpp:635-643）不调用 Widget::OnDraw，CSS background
          永远不会被画出来，线条颜色写死 theme::kDivider()（light #D1D1D1 /
          dark #424242）。要让分隔线走项目 token --app-divider 必须用 div。
@@ -49,7 +54,7 @@
 
   /* 预览工具条 32px */
   .preview-toolbar { height: 32px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
-  .preview-title { padding: 8px; font-weight: 600; color: var(--app-text); white-space: nowrap; }
+  .preview-title { padding: 8px; font-size: 14px; color: var(--app-text); white-space: nowrap; }
 
   /* 预览正文区 */
   .preview-body { flex: 1; padding: 8px; }

@@ -356,6 +356,12 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 
 **复评条件**：若 core-ui 上游后续补上 UIA 桥接或系统材质入口，重新评估本决策。
 
+**落地位置（架构侧已写完）**：
+- `spec/milestones.md` **§8「已知限制清单」**（L1~L5 逐条 + 复评条件 + 「为什么不违背用户设计意图」的原文引用）→ 验收项 **V3-13**；
+- `spec/milestones.md` M1 验收 **V1.1 的口径补充**（视觉对照**不含** Mica / 高对比度）；
+- `spec/ci-contract.md` **§4.6c**（已知限制必须随包进 `DELIVERY.md` 与 `README-FORK.md`）；
+- `SPEC.md` §8 out-of-scope 第 10、11 条 + 术语表新增「已知限制」。
+
 ---
 
 ## D14 品牌色 → **Rust 侧读系统 AccentColor**（用户设计文档的落地路径）
@@ -375,6 +381,14 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 **与前端方案的关系**：前端已把 `.uix` 里的 accent 统一读**库 token** `var(--accent)`、`--app-accent` 只作唯一源值 —— **与本决策完全兼容**，无需改动。`--app-accent` 的定位从「直接生效的值」变为「读不到系统色时的回退值」。
 
 **代价**：Rust 侧多一处注册表读取（`windows` crate 的 `RegGetValueW`）；BGR→RGB 的通道顺序必须写对（写反了会变成橙色系）。
+
+**落地位置（架构侧已写完）**：
+- `spec/ffi-core-ui.md` **§5.6.2「D14 品牌色来源契约」**（读取契约逐字 + 落点 + 启动日志格式 + 连带影响）；
+- `spec/ffi-core-ui.md` **§5.6.1 契约 2**（初始化顺序加第 0 步；`set_accent_hex` 在 `set_mode` **之后**；切模式后必须**重读重调**）；
+- `spec/ffi-core-ui.md` §4.3.2.1 **规则 5**（拼 `:root` 时**排除 `--app-accent`**）；
+- `spec/crate-layout.md` **§4.4「Rust 侧启动初始化职责落点」**（读注册表 → `crates/zsdesk-windows/src/system/accent.rs`；拼装 → `crates/zsdesk-app/src/theme.rs`；依赖方向不新增环）；
+- `spec/milestones.md` M1 产出物 **M1-9** + 验收 **V1.11**（启动日志打印 accent 值与来源，真机核对）；
+- 门禁 **S13 细化**：`themes.json` 允许 `--app-accent`（回退源值），`.uix` 禁止定义它，任何文件禁止定义库 token 全集。
 
 ---
 
