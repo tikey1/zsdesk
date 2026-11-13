@@ -1,4 +1,4 @@
-# ZSDesk
+AI修改，自己做着玩# ZSDesk
 
 Windows 原生多标签文件管理器与桌面格子，使用 Rust、Win32/COM、Direct2D 和 DirectWrite。
 
