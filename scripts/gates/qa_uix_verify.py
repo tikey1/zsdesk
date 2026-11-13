@@ -301,8 +301,8 @@ def check_file(rel: str, root: Path, rep: Report, themes: dict):
     used = set(re.findall(r"([a-zA-Z-]+)\s*:", css))
     unsupported = sorted(used - SUPPORTED_PROPS)
     for p in unsupported:
-        rep.warn(f"{rel}: CSS 属性 `{p}` 不受支持 → 声明被丢弃"
-                 + (f"（{PROP_NOTES[p]}）" if p in PROP_NOTES else ""))
+        note = PROP_NOTES.get(p, "声明被静默丢弃")
+        rep.warn(f"{rel}: CSS 属性 `{p}` 不受支持 → {note}")
     if not unsupported:
         rep.ok(f"CSS 属性：{len(used)} 种，全部受支持")
 
