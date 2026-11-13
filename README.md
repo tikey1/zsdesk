@@ -10,16 +10,11 @@ Windows 原生多标签文件管理器与桌面格子，使用 Rust、Win32/COM�
 
 ## 版本
 
-当前版本：0.3.11。
+
 
 | 版本 | Cargo features | 功能 |
 |---|---|---|
-| 标准版 | 无 | 文件管理器、搜索、预览、界面设置和系统集成 |
-| 网络版 | `network` | 标准版 + FTP、SFTP/SSH 地址、网络驱动器和网络位置 |
-| 桌面版 | `desktop` | 标准版 + 桌面格子与腾讯布局导入 |
 | 全量版 | `network,desktop` | 全部功能，默认构建版本 |
-| 主题版 | `themed` | 全量功能 + 亚克力、Mica、纯色深浅主题，独立安装与配置 |
-| 桌面盒子独立版 | `desktop-box` | 默认启动桌面格子，独立配置与自启，不包含文件管理窗口、全盘搜索和接管 |
 
 打包脚本支持为上述六个版本生成 Windows x64 便携 ZIP 和安装器，文件名为
 `ZSDesk-<版本>-<standard|network|desktop|full|themed|desktop-box>-x64`。
