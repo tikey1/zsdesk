@@ -93,6 +93,13 @@ jobs:
           ref: ${{ steps.dependency.outputs.revision }}
           path: core-ui
 
+      # 导入 MSVC x64 开发环境（INCLUDE / LIB / PATH）。
+      # 不再依赖上游 build-clang-cl.ps1 自带的 vcvars 导入逻辑 —— 那个 cmd.exe 包裹的
+      # 环境块抓取在 CI 上不稳定，且脚本不透传额外 cmake 参数。
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Locate clang-cl and llvm-rc
         id: toolchain
         shell: pwsh
@@ -158,30 +165,73 @@ jobs:
       # 这里预置该源码到 FetchContent 的默认落点 _deps/quickjs-src，
       # 让 configure 直接复用、不再联网 —— 消除浅克隆 tag / 子模块 / 认证挂死风险。
       # 预置失败不阻断：让上游脚本自己走 FetchContent 下载路径。
-      - name: Pre-fetch QuickJS-NG into the FetchContent slot
+      # core-ui 的 CMakeLists 用 FetchContent 从 GitHub 现场拉 QuickJS-NG：
+      #   FetchContent_Declare(quickjs GIT_REPOSITORY .../quickjs.git GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
+      #
+      # 注意：把源码预置到 _deps/quickjs-src **无效** —— FetchContent 是否需要下载，
+      # 由 _deps/quickjs-subbuild/quickjs-populate-prefix/src/quickjs-populate-stamp/
+      # 下的 stamp 决定；CI 每次删掉整个 clang-cl-build/（正是为了避免 stale CMakeCache.txt），
+      # stamp 一并被删 → FetchContent 判定「未下载过」→ 重新 clone → 预置白做。
+      # 正确做法是 CMake 官方覆盖变量：设了它 FetchContent 完全跳过 download。
+      #
+      # 不加 --recurse-submodules：quickjs-ng v0.14.0 的 .gitmodules 只有一个
+      # test262 子模块且 update = none（JS 引擎的测试套件，构建不需要），
+      # 递归克隆会额外拉一个体量极大的仓库。
+      - name: Pre-fetch QuickJS-NG
+        id: quickjs
         shell: pwsh
-        continue-on-error: true
         run: |
-          $dest = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\_deps\quickjs-src'
-          New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force | Out-Null
-          git clone --depth 1 --branch v0.14.0 --recurse-submodules https://github.com/quickjs-ng/quickjs.git $dest
+          $dest = Join-Path $env:RUNNER_TEMP 'quickjs'
+          git clone --depth 1 --branch v0.14.0 https://github.com/quickjs-ng/quickjs.git $dest
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           if (-not (Test-Path -LiteralPath (Join-Path $dest 'CMakeLists.txt'))) {
             throw 'pre-fetched QuickJS-NG has no CMakeLists.txt'
           }
+          "dir=$dest" >> $env:GITHUB_OUTPUT
           Write-Host "QuickJS-NG pre-fetched into $dest"
 
-      - name: Build core-ui from source
+      # 上游 scripts/build-clang-cl.ps1 的 cmake 参数原样照抄，只额外加一个
+      # -DFETCHCONTENT_SOURCE_DIR_QUICKJS（脚本不透传额外 -D，这是 CMake 官方机制）。
+      # 契约约束的是「构建结果」，不是「调用哪个脚本」（见 spec/ci-contract.md §5）。
+      # MSVC 环境由 ilammy/msvc-dev-cmd 导入，不再依赖脚本自带的 vcvars 导入逻辑。
+      - name: Configure and build core-ui from source
         shell: pwsh
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'core-ui-build.log'
-          $script = Join-Path $env:GITHUB_WORKSPACE 'core-ui\scripts\build-clang-cl.ps1'
+          $src  = Join-Path $env:GITHUB_WORKSPACE 'core-ui'
+          $bld  = Join-Path $src 'clang-cl-build'
+          $clang = "${{ steps.toolchain.outputs.path }}"
+          $rc    = "${{ steps.toolchain.outputs.rc }}"
+          $qjs   = "${{ steps.quickjs.outputs.dir }}"
+          $clangFwd = ($clang -replace '\\','/')
+          $rcFwd    = ($rc    -replace '\\','/')
           $failed = $false
           try {
-            & $script -Target core-ui -ClangClPath "${{ steps.toolchain.outputs.path }}" *>&1 | Tee-Object -FilePath $log
+            & cmake -S $src -B $bld -G Ninja `
+                "-DCMAKE_BUILD_TYPE=Release" `
+                "-DCMAKE_C_COMPILER=$clangFwd" `
+                "-DCMAKE_CXX_COMPILER=$clangFwd" `
+                "-DCMAKE_RC_COMPILER=$rcFwd" `
+                "-DFETCHCONTENT_SOURCE_DIR_QUICKJS=$qjs" *>&1 | Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) { throw "cmake configure failed ($LASTEXITCODE)" }
+            & cmake --build $bld --target core-ui *>&1 | Tee-Object -FilePath $log -Append
+            if ($LASTEXITCODE -ne 0) { throw "cmake build failed ($LASTEXITCODE)" }
           } catch {
-            $_ | Out-String | Tee-Object -FilePath $log -Append | Write-Host
+            $detail = ($_ | Out-String)
+            $detail | Tee-Object -FilePath $log -Append | Write-Host
+            # 用 workflow command 把原始异常变成 check-run annotation：
+            # run 级日志 API 需要 admin 权限，外部取不到；annotation 可经公开 API 读到。
+            $flat = ($detail -replace "`r`n", '%0A' -replace '%', '%25')
+            Write-Host "::error title=core-ui build failed::$flat"
             $failed = $true
+          }
+          # 把日志尾部也做成 annotation，便于直接定位首个真实报错
+          if (Test-Path -LiteralPath $log) {
+            $tail = (Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+            if ($tail) {
+              $flatTail = ($tail -replace "`r`n", '%0A' -replace '%', '%25')
+              Write-Host "::error title=core-ui build log (tail 40)::$flatTail"
+            }
           }
           # 日志尾部同时写进 step summary，网页上直接可见，不必展开日志
           if (Test-Path -LiteralPath $log) {
