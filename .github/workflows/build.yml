@@ -3,75 +3,98 @@ name: Windows build
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  # —— 沿用上游 zsdesk build.yml ——
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  # CI 里的 git 一律不交互：否则遇到认证提示会挂死到超时
+  GIT_TERMINAL_PROMPT: '0'
+  GIT_ASKPASS: 'echo'
+
 jobs:
-  windows:
+  # ==================================================================
+  # rust：Rust 编译 / 测试 / 门禁。**不依赖 core-ui** ——
+  # Rust 侧对 core-ui 采用运行时 LoadLibrary 动态加载（D09），
+  # 不链接 core-ui.lib，因此 core-ui 的 C++ 构建失败不会阻塞 Rust。
+  # ==================================================================
+  rust:
+    name: Rust 编译 / 测试
     runs-on: windows-latest
-    env:
-      CARGO_INCREMENTAL: '0'
-      CARGO_PROFILE_DEV_DEBUG: '0'
-      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
-      # 仓库本体放在 app/；zsui 与 core-ui 是同级目录，Rust crate 里的
-      # path 依赖 ../../../zsui 与 ../../../core-ui 依赖这个布局。
       - uses: actions/checkout@v7
         with:
           path: app
 
-      - name: Read the pinned upstream revisions
-        id: pins
+      - name: Read the pinned ZSUI revision
+        id: dependency
         shell: pwsh
-        run: |
-          $zsui   = (Get-Content -LiteralPath 'app/packaging/zsui-revision.txt' -Raw).Trim()
-          $coreui = (Get-Content -LiteralPath 'app/packaging/core-ui-revision.txt' -Raw).Trim()
-          if (-not $zsui)   { throw 'packaging/zsui-revision.txt is empty' }
-          if (-not $coreui) { throw 'packaging/core-ui-revision.txt is empty' }
-          "zsui=$zsui"     >> $env:GITHUB_OUTPUT
-          "coreui=$coreui" >> $env:GITHUB_OUTPUT
-          Write-Host "zsui   = $zsui"
-          Write-Host "coreui = $coreui"
+        run: '"revision=$((Get-Content -LiteralPath app/packaging/zsui-revision.txt -Raw).Trim())" >> $env:GITHUB_OUTPUT'
 
+      # zsui 必须与 app 同级：crates/<name>/Cargo.toml 里的 path 依赖是 ../../../zsui
       - uses: actions/checkout@v7
         with:
           repository: qiu7824/zsui
-          ref: ${{ steps.pins.outputs.zsui }}
+          ref: ${{ steps.dependency.outputs.revision }}
           path: zsui
-
-      - uses: actions/checkout@v7
-        with:
-          repository: ghboke/core-ui
-          ref: ${{ steps.pins.outputs.coreui }}
-          path: core-ui
 
       - uses: dtolnay/rust-toolchain@1.99.0
 
-      # ------------------------------------------------------------------
-      # Rust：只构建 full edition（features network + desktop = default）。
-      # Rust 侧对 core-ui 采用运行时动态加载，不链接 core-ui.lib，
-      # 因此 core-ui 的 C++ 构建失败不会阻塞 Rust 的编译与测试。
-      # ------------------------------------------------------------------
       - name: Test
         working-directory: app
         run: cargo test --workspace --release --locked
 
+      # D05：唯一交付形态 = full edition（features network + desktop = default）
       - name: Build the full edition (x64)
         working-directory: app
-        run: cargo build --locked --release -p zsdesk-app
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p zsdesk-app
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          exit 0
 
-      # 上游 CI 未启用 clippy，先作观察项，不阻断流水线。
-      - name: Clippy (full edition, advisory)
+      # 上游 CI 未启用 clippy，先作观察项；告警清零后再改为 -D warnings 强制门禁
+      - name: Clippy (advisory)
         working-directory: app
         continue-on-error: true
         run: cargo clippy --locked --release -p zsdesk-app
 
-      # ------------------------------------------------------------------
-      # core-ui：从钉住的 revision 从源码构建（clang-cl + Ninja + llvm-rc）。
-      # ------------------------------------------------------------------
-      - name: Locate clang-cl
-        id: clang
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: zsdesk-app-full-x64
+          path: app/target/release/zsdesk-app.exe
+          if-no-files-found: error
+
+  # ==================================================================
+  # core-ui：从钉住的 revision 从源码构建（clang-cl + Ninja + llvm-rc）
+  # ==================================================================
+  core-ui:
+    name: core-ui 源码构建
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: app
+
+      - name: Read the pinned core-ui revision
+        id: dependency
+        shell: pwsh
+        run: '"revision=$((Get-Content -LiteralPath app/packaging/core-ui-revision.txt -Raw).Trim())" >> $env:GITHUB_OUTPUT'
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ghboke/core-ui
+          ref: ${{ steps.dependency.outputs.revision }}
+          path: core-ui
+
+      - name: Locate clang-cl and llvm-rc
+        id: toolchain
         shell: pwsh
         run: |
           $candidates = @(
@@ -88,10 +111,19 @@ jobs:
             if ($cmd) { $found = $cmd.Source }
           }
           if (-not $found) {
-            throw 'clang-cl not found. Install LLVM or pass -ClangClPath to build-clang-cl.ps1.'
+            throw 'clang-cl not found. Install LLVM, or pass -ClangClPath to build-clang-cl.ps1.'
+          }
+          $rc = Join-Path (Split-Path -Parent $found) 'llvm-rc.exe'
+          if (-not (Test-Path -LiteralPath $rc)) {
+            # 上游脚本只在 llvm-rc 与 clang-cl 同目录时才覆盖 CMAKE_RC_COMPILER。
+            # Windows SDK 的 rc.exe (10.0.26100) 在部分 ninja 子进程会挂起，
+            # 因此 llvm-rc 缺失必须显式失败，不能静默退回 rc.exe。
+            throw "llvm-rc.exe not found next to $found — the build would hang in rc.exe. Install LLVM with llvm-rc."
           }
           "path=$found" >> $env:GITHUB_OUTPUT
+          "rc=$rc"     >> $env:GITHUB_OUTPUT
           Write-Host "clang-cl: $found"
+          Write-Host "llvm-rc  : $rc"
 
       - name: Ensure Ninja is available
         shell: pwsh
@@ -107,10 +139,29 @@ jobs:
           }
           Write-Host "ninja installed: $((Get-Command ninja).Source)"
 
+      # core-ui 的 CMakeLists 用 FetchContent 从 GitHub 现场拉 QuickJS-NG：
+      #   FetchContent_Declare(quickjs GIT_REPOSITORY https://github.com/quickjs-ng/quickjs.git
+      #                         GIT_TAG v0.14.0 GIT_SHALLOW TRUE)
+      # 这里预置该源码到 FetchContent 的默认落点 _deps/quickjs-src，
+      # 让 configure 直接复用、不再联网 —— 消除 CI 上的浅克隆 tag / 子模块 / 认证挂死风险。
+      # 预置失败不阻断：让上游脚本自己走 FetchContent 下载路径。
+      - name: Pre-fetch QuickJS-NG into the FetchContent slot
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $dest = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\_deps\quickjs-src'
+          New-Item -ItemType Directory -Path (Split-Path -Parent $dest) -Force | Out-Null
+          git clone --depth 1 --branch v0.14.0 --recurse-submodules https://github.com/quickjs-ng/quickjs.git $dest
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (-not (Test-Path -LiteralPath (Join-Path $dest 'CMakeLists.txt'))) {
+            throw 'pre-fetched QuickJS-NG has no CMakeLists.txt'
+          }
+          Write-Host "QuickJS-NG pre-fetched into $dest"
+
       - name: Build core-ui from source
         shell: pwsh
         run: |
-          & "$env:GITHUB_WORKSPACE\core-ui\scripts\build-clang-cl.ps1" -Target core-ui -ClangClPath "${{ steps.clang.outputs.path }}"
+          & "$env:GITHUB_WORKSPACE\core-ui\scripts\build-clang-cl.ps1" -Target core-ui -ClangClPath "${{ steps.toolchain.outputs.path }}"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Verify core-ui.dll is a Windows x86-64 image
@@ -123,7 +174,7 @@ jobs:
           $bytes = [IO.File]::ReadAllBytes($dll)
           $pe = [BitConverter]::ToInt32($bytes, 0x3C)
           if ([Text.Encoding]::ASCII.GetString($bytes, $pe, 4) -ne "PE`0`0") {
-            throw "core-ui.dll is not a valid PE image"
+            throw 'core-ui.dll is not a valid PE image'
           }
           $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
           if ($machine -ne 0x8664) {
@@ -131,11 +182,68 @@ jobs:
           }
           Write-Host ("core-ui.dll OK: {0} bytes, Machine=0x8664" -f (Get-Item -LiteralPath $dll).Length)
 
-      # ------------------------------------------------------------------
-      # 打包：full x64 便携 ZIP（逐文件 bytes + SHA-256 manifest）。
-      # Everything 引擎不在包内（上游 package.ps1 需要外部 -EverythingDir，
-      # CI 上没有官方分发目录；它是可选后端，由用户在软件内选择）。
-      # ------------------------------------------------------------------
+      # 门禁 S7：机器判定 CRT 必须是动态（/MD）—— 必须出现 MSVCP140.dll 与 VCRUNTIME140.dll
+      - name: Gate S7 — core-ui.dll must link the dynamic VC++ runtime
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\core-ui.dll'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'Visual Studio C++ x64 tools not found on the runner' }
+          $dumpbin = Get-ChildItem -LiteralPath (Join-Path $installation 'VC\Tools\MSVC') -Recurse -Filter 'dumpbin.exe' -ErrorAction SilentlyContinue |
+                     Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if (-not $dumpbin) { throw 'dumpbin.exe (x64) not found under the VS installation' }
+          $deps = & $dumpbin.FullName /dependents $dll
+          Write-Host ($deps -join "`n")
+          foreach ($required in 'VCRUNTIME140.dll','MSVCP140.dll') {
+            if (-not ($deps -match [regex]::Escape($required))) {
+              throw "core-ui.dll does not depend on $required — the CRT mode is not the expected dynamic /MD"
+            }
+          }
+          Write-Host 'Gate S7 passed: dynamic VC++ runtime confirmed.'
+
+      - name: Upload core-ui.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-ui-x64
+          path: core-ui/clang-cl-build/core-ui.dll
+          if-no-files-found: error
+
+  # ==================================================================
+  # package：便携 ZIP 组装（依赖前两个 job）
+  # ==================================================================
+  package:
+    name: 便携包组装
+    runs-on: windows-latest
+    needs: [rust, core-ui]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: app
+
+      - name: Download the executable
+        uses: actions/download-artifact@v4
+        with:
+          name: zsdesk-app-full-x64
+          path: app/target/release
+
+      - name: Download core-ui.dll
+        uses: actions/download-artifact@v4
+        with:
+          name: core-ui-x64
+          path: app/target/release
+
+      # 门禁 S12：core-ui.dll 必须与 exe 同目录，否则运行时可能命中 PATH 里的其它副本
+      - name: Gate S12 — core-ui.dll must sit next to the executable
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe'
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "executable not found at $exe" }
+          if (-not (Test-Path -LiteralPath $dll)) { throw "core-ui.dll not found at $dll" }
+          Write-Host 'Gate S12 passed: core-ui.dll is next to the executable.'
+
       - name: Collect the Visual C++ x64 Redistributable
         id: crt
         shell: pwsh
@@ -169,13 +277,8 @@ jobs:
           $stage  = Join-Path $env:GITHUB_WORKSPACE "stage/ZSDesk-$version-full-x64"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-          $exe = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe'
-          if (-not (Test-Path -LiteralPath $exe)) { throw "executable not found at $exe" }
-          Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'ZSDesk.exe')
-
-          $coreui = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\core-ui.dll'
-          if (-not (Test-Path -LiteralPath $coreui)) { throw "core-ui.dll not found at $coreui" }
-          Copy-Item -LiteralPath $coreui -Destination (Join-Path $stage 'core-ui.dll')
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe') -Destination (Join-Path $stage 'ZSDesk.exe')
+          Copy-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll')       -Destination (Join-Path $stage 'core-ui.dll')
 
           $crtDir = '${{ steps.crt.outputs.dir }}'
           foreach ($dll in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') {
@@ -188,7 +291,7 @@ jobs:
           }
           New-Item -ItemType Directory -Path (Join-Path $stage 'licenses') -Force | Out-Null
           if (Test-Path -LiteralPath 'app/packaging/licenses') {
-            Copy-Item -LiteralPath 'app/packaging/licenses/*.txt' -Destination (Join-Path $stage 'licenses') -ErrorAction SilentlyContinue
+            Copy-Item -Path 'app/packaging/licenses/*.txt' -Destination (Join-Path $stage 'licenses') -ErrorAction SilentlyContinue
           }
 
           # 逐文件 bytes + SHA-256 manifest（沿用上游 package.ps1 的清单口径）
