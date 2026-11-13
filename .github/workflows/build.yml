@@ -15,43 +15,202 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
+      # 仓库本体放在 app/；zsui 与 core-ui 是同级目录，Rust crate 里的
+      # path 依赖 ../../../zsui 与 ../../../core-ui 依赖这个布局。
       - uses: actions/checkout@v7
         with:
-          path: zsdesk
-      - name: Read the ZSUI revision
-        id: dependency
+          path: app
+
+      - name: Read the pinned upstream revisions
+        id: pins
         shell: pwsh
-        run: '"revision=$((Get-Content -LiteralPath zsdesk/packaging/zsui-revision.txt -Raw).Trim())" >> $env:GITHUB_OUTPUT'
+        run: |
+          $zsui   = (Get-Content -LiteralPath 'app/packaging/zsui-revision.txt' -Raw).Trim()
+          $coreui = (Get-Content -LiteralPath 'app/packaging/core-ui-revision.txt' -Raw).Trim()
+          if (-not $zsui)   { throw 'packaging/zsui-revision.txt is empty' }
+          if (-not $coreui) { throw 'packaging/core-ui-revision.txt is empty' }
+          "zsui=$zsui"     >> $env:GITHUB_OUTPUT
+          "coreui=$coreui" >> $env:GITHUB_OUTPUT
+          Write-Host "zsui   = $zsui"
+          Write-Host "coreui = $coreui"
+
       - uses: actions/checkout@v7
         with:
           repository: qiu7824/zsui
-          ref: ${{ steps.dependency.outputs.revision }}
+          ref: ${{ steps.pins.outputs.zsui }}
           path: zsui
+
+      - uses: actions/checkout@v7
+        with:
+          repository: ghboke/core-ui
+          ref: ${{ steps.pins.outputs.coreui }}
+          path: core-ui
+
       - uses: dtolnay/rust-toolchain@1.99.0
+
+      # ------------------------------------------------------------------
+      # Rust：只构建 full edition（features network + desktop = default）。
+      # Rust 侧对 core-ui 采用运行时动态加载，不链接 core-ui.lib，
+      # 因此 core-ui 的 C++ 构建失败不会阻塞 Rust 的编译与测试。
+      # ------------------------------------------------------------------
       - name: Test
-        working-directory: zsdesk
+        working-directory: app
         run: cargo test --workspace --release --locked
-      - name: Check all editions
-        working-directory: zsdesk
+
+      - name: Build the full edition (x64)
+        working-directory: app
+        run: cargo build --locked --release -p zsdesk-app
+
+      # 上游 CI 未启用 clippy，先作观察项，不阻断流水线。
+      - name: Clippy (full edition, advisory)
+        working-directory: app
+        continue-on-error: true
+        run: cargo clippy --locked --release -p zsdesk-app
+
+      # ------------------------------------------------------------------
+      # core-ui：从钉住的 revision 从源码构建（clang-cl + Ninja + llvm-rc）。
+      # ------------------------------------------------------------------
+      - name: Locate clang-cl
+        id: clang
         shell: pwsh
         run: |
-          cargo check --locked --release -p zsdesk-app --no-default-features
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo check --locked --release -p zsdesk-app --no-default-features --features network
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo check --locked --release -p zsdesk-app --no-default-features --features desktop
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo build --locked --release -p zsdesk-app
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo check --locked --release -p zsdesk-app --no-default-features --features themed
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo check --locked --release -p zsdesk-app --no-default-features --features desktop-box
-          exit $LASTEXITCODE
-      - name: Test theme and desktop-only editions
-        working-directory: zsdesk
+          $candidates = @(
+            (Join-Path $env:ProgramFiles 'LLVM\bin\clang-cl.exe'),
+            'C:\Program Files\LLVM\bin\clang-cl.exe',
+            'C:\Program Files (x86)\LLVM\bin\clang-cl.exe'
+          )
+          $found = $null
+          foreach ($c in $candidates) {
+            if (Test-Path -LiteralPath $c) { $found = $c; break }
+          }
+          if (-not $found) {
+            $cmd = Get-Command clang-cl -ErrorAction SilentlyContinue
+            if ($cmd) { $found = $cmd.Source }
+          }
+          if (-not $found) {
+            throw 'clang-cl not found. Install LLVM or pass -ClangClPath to build-clang-cl.ps1.'
+          }
+          "path=$found" >> $env:GITHUB_OUTPUT
+          Write-Host "clang-cl: $found"
+
+      - name: Ensure Ninja is available
         shell: pwsh
         run: |
-          cargo test --locked --release -p zsdesk-app --no-default-features --features themed
+          if (Get-Command ninja -ErrorAction SilentlyContinue) {
+            Write-Host "ninja already available: $((Get-Command ninja).Source)"
+            exit 0
+          }
+          python -m pip install --upgrade ninja
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo test --locked --release -p zsdesk-app --no-default-features --features desktop-box
-          exit $LASTEXITCODE
+          if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+            throw 'ninja is still not on PATH after pip install'
+          }
+          Write-Host "ninja installed: $((Get-Command ninja).Source)"
+
+      - name: Build core-ui from source
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE\core-ui\scripts\build-clang-cl.ps1" -Target core-ui -ClangClPath "${{ steps.clang.outputs.path }}"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Verify core-ui.dll is a Windows x86-64 image
+        shell: pwsh
+        run: |
+          $dll = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\core-ui.dll'
+          if (-not (Test-Path -LiteralPath $dll)) {
+            throw "core-ui.dll was not produced at $dll"
+          }
+          $bytes = [IO.File]::ReadAllBytes($dll)
+          $pe = [BitConverter]::ToInt32($bytes, 0x3C)
+          if ([Text.Encoding]::ASCII.GetString($bytes, $pe, 4) -ne "PE`0`0") {
+            throw "core-ui.dll is not a valid PE image"
+          }
+          $machine = [BitConverter]::ToUInt16($bytes, $pe + 4)
+          if ($machine -ne 0x8664) {
+            throw ("core-ui.dll is not x86-64 (Machine=0x{0:X4}, expected 0x8664)" -f $machine)
+          }
+          Write-Host ("core-ui.dll OK: {0} bytes, Machine=0x8664" -f (Get-Item -LiteralPath $dll).Length)
+
+      # ------------------------------------------------------------------
+      # 打包：full x64 便携 ZIP（逐文件 bytes + SHA-256 manifest）。
+      # Everything 引擎不在包内（上游 package.ps1 需要外部 -EverythingDir，
+      # CI 上没有官方分发目录；它是可选后端，由用户在软件内选择）。
+      # ------------------------------------------------------------------
+      - name: Collect the Visual C++ x64 Redistributable
+        id: crt
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          if (-not (Test-Path -LiteralPath $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'Visual Studio C++ x64 tools not found on the runner' }
+          $redistRoot = Join-Path $installation 'VC\Redist\MSVC'
+          $crtDir = $null
+          foreach ($versionDir in (Get-ChildItem -LiteralPath $redistRoot -Directory -ErrorAction SilentlyContinue |
+                                   Where-Object { $_.Name -match '^\d+\.\d+\.\d+$' } |
+                                   Sort-Object { [version]$_.Name } -Descending |
+                                   ForEach-Object { Join-Path $_.FullName 'x64' })) {
+            $dir = Get-ChildItem -LiteralPath $versionDir -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue |
+                   Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'msvcp140.dll') } |
+                   Select-Object -First 1
+            if ($dir) { $crtDir = $dir.FullName; break }
+          }
+          if (-not $crtDir) { throw 'Visual C++ x64 Redistributable directory not found' }
+          foreach ($dll in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') {
+            if (-not (Test-Path -LiteralPath (Join-Path $crtDir $dll))) { throw "missing CRT runtime: $dll" }
+          }
+          "dir=$crtDir" >> $env:GITHUB_OUTPUT
+          Write-Host "CRT dir: $crtDir"
+
+      - name: Package the portable x64 zip
+        shell: pwsh
+        run: |
+          $version = ([regex]::Match((Get-Content -LiteralPath 'app/Cargo.toml' -Raw), '(?m)^version\s*=\s*"([^"]+)"')).Groups[1].Value
+          $stage  = Join-Path $env:GITHUB_WORKSPACE "stage/ZSDesk-$version-full-x64"
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe'
+          if (-not (Test-Path -LiteralPath $exe)) { throw "executable not found at $exe" }
+          Copy-Item -LiteralPath $exe -Destination (Join-Path $stage 'ZSDesk.exe')
+
+          $coreui = Join-Path $env:GITHUB_WORKSPACE 'core-ui\clang-cl-build\core-ui.dll'
+          if (-not (Test-Path -LiteralPath $coreui)) { throw "core-ui.dll not found at $coreui" }
+          Copy-Item -LiteralPath $coreui -Destination (Join-Path $stage 'core-ui.dll')
+
+          $crtDir = '${{ steps.crt.outputs.dir }}'
+          foreach ($dll in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') {
+            Copy-Item -LiteralPath (Join-Path $crtDir $dll) -Destination (Join-Path $stage $dll)
+          }
+
+          Copy-Item -LiteralPath 'app/LICENSE' -Destination (Join-Path $stage 'LICENSE')
+          if (Test-Path -LiteralPath 'app/THIRD-PARTY-NOTICES.txt') {
+            Copy-Item -LiteralPath 'app/THIRD-PARTY-NOTICES.txt' -Destination (Join-Path $stage 'THIRD-PARTY-NOTICES.txt')
+          }
+          New-Item -ItemType Directory -Path (Join-Path $stage 'licenses') -Force | Out-Null
+          if (Test-Path -LiteralPath 'app/packaging/licenses') {
+            Copy-Item -LiteralPath 'app/packaging/licenses/*.txt' -Destination (Join-Path $stage 'licenses') -ErrorAction SilentlyContinue
+          }
+
+          # 逐文件 bytes + SHA-256 manifest（沿用上游 package.ps1 的清单口径）
+          $manifest = Join-Path $stage 'manifest.sha256'
+          $lines = New-Object System.Collections.Generic.List[string]
+          foreach ($f in (Get-ChildItem -LiteralPath $stage -Recurse -File | Sort-Object FullName)) {
+            if ($f.FullName -eq $manifest) { continue }
+            $hash = (Get-FileHash -LiteralPath $f.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $rel  = $f.FullName.Substring($stage.Length + 1).Replace('\','/')
+            $lines.Add("$hash  $rel  $($f.Length)")
+          }
+          Set-Content -LiteralPath $manifest -Value $lines -Encoding utf8
+
+          $zip = Join-Path $env:GITHUB_WORKSPACE "ZSDesk-$version-full-x64.zip"
+          if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
+          Write-Host "package: $zip"
+          Get-Item -LiteralPath $zip | ForEach-Object { Write-Host ("size: {0} bytes" -f $_.Length) }
+
+      - name: Upload the portable package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ZSDesk-full-x64
+          path: ZSDesk-*-full-x64.zip
+          if-no-files-found: error

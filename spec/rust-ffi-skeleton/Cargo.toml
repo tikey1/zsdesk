@@ -1,0 +1,14 @@
+[package]
+name = "zc-ffi-coreui"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+license = "MIT"
+description = "core-ui C API 的运行时动态加载绑定层：所有 unsafe 收敛在此 crate，UI 业务层只见安全 Rust API。"
+
+[dependencies]
+# 动态加载 core-ui.dll。刻意不引入 bindgen —— 见 spec/ffi-core-ui.md §2「为什么不用 bindgen」。
+libloading = "0.8"
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "warn"
