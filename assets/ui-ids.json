@@ -1,0 +1,56 @@
+{
+  "_comment": "Rust 侧 ui_widget_find_by_id 的期望 id 清单（单一事实源）。每个 id 必须在本页的 .uix 里存在，且 Rust 侧必须能取到。docs/13 的 H1 检查项与 scripts/gates/ui_id_manifest_check.py 都以本文件为准。新增/删除 id 时三处必须同步：① 本文件 ② 对应 .uix ③ docs/12 的句柄数统计。",
+  "version": 3,
+  "total": 32,
+  "pages": {
+    "main": {
+      "file": "main.uix",
+      "count": 26,
+      "ids": [
+        "address",
+        "address_host",
+        "breadcrumb",
+        "command_host",
+        "global_search",
+        "infobar_host",
+        "list_host",
+        "nav_hint",
+        "nav_host",
+        "preview_host",
+        "preview_host_channel",
+        "preview_host_name",
+        "preview_host_size",
+        "preview_host_state",
+        "preview_image",
+        "search",
+        "status_host",
+        "status_image_channel",
+        "status_item_count",
+        "status_progress",
+        "status_selected",
+        "status_text",
+        "status_thumb_cache",
+        "tab_host",
+        "tab_placeholder",
+        "titlebar_host"
+      ]
+    },
+    "preview": {
+      "file": "preview.uix",
+      "count": 6,
+      "ids": [
+        "preview_body",
+        "preview_channel",
+        "preview_hint",
+        "preview_size",
+        "preview_state",
+        "preview_title"
+      ]
+    },
+    "about": {
+      "file": "about.uix",
+      "count": 0,
+      "ids": []
+    }
+  }
+}

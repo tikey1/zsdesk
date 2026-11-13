@@ -25,10 +25,15 @@
   - [ ] **【P0】`:root` 块确实注入了**（而不是没注入）
         —— 没注入是**静默**的：界面出得来，但 `var(--app-*)` 解析成空串
         （`cascade.cpp:79-81` → `ParseColor("")` 失败）→ 全是库默认色
-        （纯白底 / `#424242` 文字 / `#D1D1D1` 分隔线）
+        （窗口底纯白 `#FFFFFF` / 文字 `#242424` / **分隔线直接消失** —— 分隔线已是
+         `<div class="divider">`，`--app-divider` 未定义时 `background` 解析失败 → 画不出来）
   - [ ] **【P0】注入发生在 `ui_page_load_string` 之前**（时序错了同上，静默回落库色）
-  - [ ] **【P0】切主题若走「重建页面」：旧 page 已 `ui_page_destroy` + 27 个句柄全部重取**
+  - [ ] **【P0】切主题若走「重建页面」：旧 page 已 `ui_page_destroy` + 32 个句柄全部重取**
         —— 新 page ⇒ 旧 `ui_widget_find_by_id` 句柄全部失效，继续用会写到野内存
+  - [ ] **【P0】注入的 `:root` 是源码中【第一个】`:root`**（自定义属性**先定义者赢**：`LookupVar` 返回第一个命中，`value.cpp:573-581`；`:root` 规则不进 CSS 级联，`cascade.cpp:124-125`）—— 若 `.uix` 自带 `:root` 且排在注入块之前，注入值被**静默忽略**。当前三个 `.uix` 生效 `:root` 规则数 = 0 ✓
+  - [ ] 口径提醒：`text="..."` 属性无效，**只针对本仓库 `.uix` 资产的写法**。
+        **Rust 侧向 `.uix` 注入状态是合法通道**（`ui_page_set_*` + 模板里的 `{{ }}` 插值），
+        不要把这条误当成"Rust 侧也不能注入文本"。
 
 > **重要**：第 0 项的 4 条只要少做一条，后面「颜色 / 字体 / 深浅色」的条目会**全部误报**。先确认这 4 条再做。
 
@@ -69,7 +74,7 @@
 |---|---|
 | **看什么** | ① 窗口底色是不是 `#F3F3F3`（浅色）<br>② 列表区是不是 `#FFFFFF`、导航/预览窗格是不是 `#FBFBFB`、工具条/状态栏是不是 `#F7F7F7`<br>③ 文字是不是 `#1B1B1B`、次要文字 `#616161`<br>④ 分隔线是不是 `#E0E0E0`<br>⑤ 选中/下划线是不是 `#2563EB` |
 | **期望什么** | 全部等于 `assets/themes.json` 的 `light` 值（色值一个没改，只改了 token 名） |
-| **异常怎么定位** | 全是库的默认色（底色纯白 `#FFFFFF`、文字 `#424242`、分隔线 `#D1D1D1`）→ **`--app-*` 根本没进页面**，按顺序查：<br>① Rust 有没有把 `:root { … }` 拼进 `.uix` 源码再 `ui_page_load_string`（**没有运行时变量 API，这是唯一入口**）<br>② 自定义属性是不是写在了 `:root` 里（写在别的选择器下会被 `cascade.cpp:134` 直接忽略）<br>③ token 名有没有写成旧名（`--bg` / `--text` / `--divider`…）——旧名现在不存在，会回落到库 token 或解析失败<br>④ `.uix` 里引用的名字和 `themes.json` 里的键是否**逐字一致**（大小写敏感）<br>**只有 accent 是例外**：accent 应读库 token `var(--accent)`，若显示 `#3971EC`（库默认蓝）而不是 `#2563EB` → Rust 没调 `ui_theme_set_accent_hex` |
+| **异常怎么定位** | 全是库的默认色（窗口底纯白 `#FFFFFF`、文字 `#242424`、**分隔线直接消失**）→ **`--app-*` 根本没进页面**，按顺序查：<br>① Rust 有没有把 `:root { … }` 拼进 `.uix` 源码再 `ui_page_load_string`（**没有运行时变量 API，这是唯一入口**）<br>② 自定义属性是不是写在了 `:root` 里（写在别的选择器下会被 `cascade.cpp:134` 直接忽略）<br>③ token 名有没有写成旧名（`--bg` / `--text` / `--divider`…）——旧名现在不存在，会回落到库 token 或解析失败<br>④ `.uix` 里引用的名字和 `themes.json` 里的键是否**逐字一致**（大小写敏感）<br>**只有 accent 是例外**：accent 应读库 token `var(--accent)`，若显示 `#3971EC`（库默认蓝）而不是 `#2563EB` → Rust 没调 `ui_theme_set_accent_hex` |
 | **补充** | `var()` 支持已源码核实（`cascade.cpp:42-54`、`value.h:91`）；**但库自有的 34 个 token 会被 `ui_theme_set_mode` 清空重写**，所以项目 token 绝不能和它们同名 —— 这也是本轮全部加 `--app-` 前缀的原因 |
 
 ### M05 · `<style>` 里 class 选择器与 id 选择器的支持度
@@ -104,7 +109,7 @@
 | L4 | 地址与搜索条高度 | 36px；面包屑在左（自适应）、地址框在中间（`flex:1`）、搜索框在右且**固定 220px** | 搜索框被挤扁 → `.search` 的 `width: 220px` 被 `flex-shrink` 压缩（本轮未对 `.search` 加 `flex-shrink: 0`，若出现挤压需补） |
 | L5 | 左侧导航窗格宽度 | 220px | 变窄 → `.nav-host` 的 `width` 被覆盖 |
 | L6 | 右侧预览窗格宽度 | 320px | 同上 |
-| L7 | 中间列表区宽度 | 剩余全部（`flex: 1`） | 被挤 → `.list-host` 缺 `flex: 1` |
+| L7 | 中间列表区宽度 | 剩余全部（`flex: 1`），**且实际有宽度**（不是 0） | 被挤 → `.list-host` 缺 `flex: 1`；**宽度为 0** → 宿主写成了 `<div>` 而不是 `<custom>`（运行时 `ui_custom()` 造的控件没有 CSS 级联结果 → 无 flex → 尺寸 0，架构裁定见 `docs/12` §5 R5） |
 | L8 | 竖分隔线 | 2 条，各 1px 宽，通高 | 见 M06 |
 | L9 | 水平分隔线 | 4 条（标签栏下 / 命令栏下 / 地址条下 / 状态栏上），各 1px 高，通宽，颜色 `--app-divider`（浅 `#E0E0E0`） | 线不见了 → ① `.divider` 的 `height: 1px` 有没有被 `flex-shrink` 压成 0（已加 `flex-shrink: 0`）② `--app-divider` 有没有注入成功（M04）③ **注意：本轮已把 `<separator>` 全换成 `<div>`** —— `<separator>` 不画 CSS background（`controls.cpp:635-643`），用它永远拿不到项目 token |
 | L10 | 信息条 | 默认**收起**（0 高，看不到）；`.infobar-visible` 时 36px | 一直显示 → `.infobar` 的 `height: 0px` 被覆盖 |
@@ -115,12 +120,12 @@
 
 | # | 看什么 | 期望 | 异常怎么定位 |
 |---|---|---|---|
-| H1 | 21 个 id 是否都能被 Rust 取到 | `ui_widget_find_by_id` 全部命中（main 21 / preview 6） | 取不到 → 检查该元素是否被改成了 core-ui 不支持的标签（现在全部支持）；空句柄 → Rust 侧 id 字符串写错 |
+| H1 | **32 个 id** 是否都能被 Rust 取到 | `ui_widget_find_by_id` 全部命中（main **26** + preview 6；原有 27 个 + 第七轮新增 5 个） | 取不到 → 检查该元素是否被改成了 core-ui 不支持的标签（现在全部支持）；空句柄 → Rust 侧 id 字符串写错 |
 | H2 | 标题栏应用名 | 显示 `tabbed_files` | 空白 → ① 用了 `text=` 属性（不生效）② 文字写在标签外 ③ 该 label 是 inline 但被 0 宽容器裁掉 |
 | H3 | 标签栏占位文字 | 显示「标签页由 Rust 侧 TabManager 提供」 | 空白 → 同 H2；这条最容易踩：`text=` 属性在 `.uix` 里不生效 |
 | H4 | 命令栏提示 | 显示「后退 前进 上级 刷新 · 查看 排序 预览」 | 空白 → 同 H2 |
 | H5 | 状态栏 6 个片段 | Rust 写入后各自显示（`ui_label_set_text`） | 写入后不显示 → 该元素不是 LabelWidget（本轮全部是 `<span>` → LabelWidget，可写）；或 Rust 用错了句柄 |
-| H6 | 面包屑 / 导航 / 列表 / 预览 四个宿主区 | 空但**有底色**（`--app-content-bg` / `--app-sidebar-bg`） | 整个区域空白且**连底色都没有** → 该 `<div>` 的 `flex`/`width` 没生效，或被父级压成 0 |
+| H6 | 面包屑 / 导航 / 列表 / 预览 四个宿主区（**第七轮后形态变了**） | **导航区 `<custom id="nav_host">`、列表区 `<custom id="list_host">`**（Rust 自绘）；**面包屑 `<label id="breadcrumb">`**（文本投影，Rust 用 `ui_label_set_text` 填）；**预览区 `<div id="preview_host">` 容器** = `<custom id="preview_image">`（图片位，Rust blit）+ 4 行 `<label class="preview-meta">` 元信息 | 整个区域空白且**连底色都没有** → 该宿主的 `flex`/`width` 没生效，或被父级压成 0；<br>导航 / 列表 / 图片位空白但**宽度正常** → Rust 还没把 `ui_custom_on_draw` 挂上（对非 CustomWidget 是**静默 no-op**）；<br>宽度**为 0** → 宿主不是 `<custom>`（`<div>` 宿主拿不到 CSS 级联 → 尺寸 0）；<br>导航区宽度**不是 220px** → `.nav-host { width: 220px }` 没生效；<br>**面包屑整行空白** → Rust 还没调 `ui_label_set_text(w, L"…")`（`<label>` 默认无文本）；<br>**元信息行空白但区域有色** → 同理，Rust 未投影文本 |
 | H7 | 关于面板 | 标题 + 13 条条目 + 2 条分隔线；长条目**在窗宽内折行** | 横向溢出 → `.row` / `.heading` 缺 `display: block` |
 | H8 | 预览窗格 | 标题「预览」+ 分隔线 + 正文区 + 4 行提示 | 标题不显示 → 同 H2 |
 | H9 | 首版只读 | 命令栏**没有**新建/重命名/删除/剪贴板入口 | 出现写操作 → 资产被误改 |
@@ -131,10 +136,10 @@
 |---|---|---|---|
 | F1 | 正文字体 | 拉丁 Segoe UI Variable（Win11）/ Segoe UI（Win10）；中文 Microsoft YaHei UI | 字体没变 → Rust 没调 `ui_theme_set_default_font` / `ui_theme_set_cjk_font`（**`.uix` 里的 `font-family` 对普通 LabelWidget 不生效**，只对 SVG 文本生效） |
 | F2 | 标题栏应用名字号 | 13px | 偏大/偏小 → `.app-title { font-size: 13px }` 未生效 |
-| F3 | 关于面板标题字号 | 16px、**不加粗**（`font-weight: 600` 在 core-ui 是空声明，见 F6） | 同上（`.heading`） |
+| F3 | 关于面板标题字号 | **14px**、**不加粗**，层级靠**字号 + 颜色**（交付总监 I4 裁决，采纳选项 (c)） | 同上（`.heading`）。注意：docs/07 §4 规定标题 14px，正文 13px、次要 12px |
 | F4 | 长文本是否被截断成省略号 | 状态栏片段过长时显示 `abc...` 而非折行 | 折行 → `.status-segment` 缺 `white-space: nowrap` |
 | F5 | 中文与英文混排 | 无豆腐块、无基线跳动 | 豆腐块 → 缺 `ui_theme_set_cjk_font` |
-| F6 | 预览窗格标题「预览」、关于面板标题「tabbed_files 1.2.3」 | **当前预期是不加粗** —— `font-weight: 600` 在 core-ui 是空声明（只认 `bold`/`700`，`widget_factory.cpp:1392-1395`），见 `docs/12` §5 R8。**若真机上标题明显不粗，不是 bug，是待裁决项** | 要强调有三条路：改 `bold`（超 docs/07 字重上限）／把标题字号提到 14px 靠字号做层级（推荐）／保持现状 |
+| F6 | 预览窗格标题「预览」、关于面板标题「tabbed_files 1.2.3」 | **14px、不加粗，层级靠字号 + 颜色** —— **已裁决**（交付总监 I4，采纳选项 (c)）：`font-weight: 600` 已从两个 class 里删除（core-ui 只认 `bold`/`700`，600 是空声明；且 600 越了 docs/07 §4「字重仅 400/500」的上限），字号按 docs/07 §4 提到 14px。**真机上标题不粗是预期，不是 bug** | 若真机上标题明显**大于**其他文字 → `.preview-title` / `.heading` 的 `font-size: 14px` 没生效 |
 | F7 | 三个输入框（全局搜索 / 地址 / 筛选）底色 | 白色（浅色模式）＝ `--app-content-bg`，**不是**库的输入框默认态 | CSS `background` 会被采纳（`controls.cpp:1052-1063` 优先用 `bgColor`）；但注意**因此没有 hover / focus 底色变化**，只有边框变化 —— 若产品要 hover 态，需改由 Rust 设色或加 `border-width` |
 
 ## 5. DPI（100 / 125 / 150 / 200%）
@@ -154,6 +159,7 @@
 | C2 | 切深色后**库控件**（按钮/输入框/焦点环）是否变深 | 跟随系统 | 不变 → 没调 `ui_theme_set_mode` |
 | C3 | accent 在两个模式下 | 浅 `#2563EB` / 深 `#60A5FA`；且**自绘区与按钮是同一个蓝** | 深色下变成 `#3971EC` → Rust 切 mode 后**没有重新调** `ui_theme_set_accent_hex`（切 mode 只保留 accent override 的**值**，不会自动换成另一套色值） |
 | C4 | 切深色后是否有**半深半浅**（一半新一半旧） | 全套一起变 | 半深半浅 → 只切了库没重建页面（C1），或重建了但没先 `ui_theme_set_mode` |
+| C6 | 切深色**并重建页面之后**，**32 个 id**（main **26** + preview 6）是否仍全部能 `ui_widget_find_by_id` 取到 | 全部命中 | 取不到 → Rust 侧没在重建后重新绑定句柄，仍拿着旧 page 的悬空句柄（新 page ⇒ 旧句柄全部失效）；连带要检查 `ui_page_on_widget_mount` 钩子是否**在新 page 上重新注册**（钩子挂在具体 page 上，旧 page 的不会自动转移） |
 | C5 | 深色下分隔线是否还可见 | `#3D3D3D` 可见但不刺眼 | 看不见 → 检查 `--app-divider` 是否注入成功（`<separator>` 本来是库色 `#424242`，本轮已全改 `<div>`，所以这里应是项目 token 色；**若看到 `#424242` 说明还是 `<separator>` 或 token 没注入**） |
 
 ## 7. 加载与错误处理
@@ -194,7 +200,7 @@
    分隔线走项目 token `--app-divider`，不再是库色 `#D1D1D1` / `#424242`。
    但「1px 实心 div 在各 DPI 下是否看得见」仍需真机看。）
 7. ~~`TextInputWidget` 是否会用库默认 `inputBg` 盖掉 CSS 的 `background`~~ → **已查实：不会**（`controls.cpp:1052-1063` 优先用 CSS 的 `bgColor`）；**残留问题是这三个输入框因此没有 hover / focus 底色变化**（见 F7）。
-8. **`font-weight: 600` 是否真的不加粗** → 源码已答：**不加粗**（只认 `bold`/`700`）。需要设计师裁决的是「要不要改」，不是「是不是加粗」（见 F6 / `docs/12` §5 R8）。
+8. ~~**`font-weight: 600` 是否真的不加粗**~~ → **已结案**（第三轮）：交付总监 I4 裁决采纳选项 (c) —— 两个 class 的 `font-weight: 600` **已删除**，字号按 docs/07 §4 提到 **14px**，层级改由**字号 + 颜色**承担。真机只需确认标题是 14px 且不加粗（见 F3 / F6）。
 9. **`<input>` 的默认圆角**：core-ui 未设 `border-radius` 时用 `theme::radius::medium`（`controls.cpp:1047`），与 docs/07「控件圆角 4 px」是否一致 —— 需真机看一眼。
 10. ~~**根 `<div class="root">` 是否铺满窗口**~~ → **已结案**：`src/ui/ui_window.cpp:1533`
     `root_->rect = {0, 0, size.width, size.height}` ⇒ 根控件铺满客户端区，

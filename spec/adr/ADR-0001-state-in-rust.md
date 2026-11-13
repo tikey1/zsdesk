@@ -37,6 +37,17 @@ core-ui 的 `.uix` 是 **Vue 3 SFC 风格**，内嵌 QuickJS-NG，有自己的�
 > 另：因库无运行时替换 CSS 变量的 C API，页面改用 **`ui_page_load_string`** 加载
 > （Rust 注入 `:root`），不是 `ui_page_load_file`。）
 
+> ### 修订记录（本 ADR 的「决策」正文已被后续裁定取代，以下列时间线为准）
+>
+> | 版本 | 结论 | 取代它的原因 |
+> |---|---|---|
+> | v1 | 运行时 `ui_custom()` + `ui_widget_add_child()` | ★ **已被 D12-1 取代**：运行时造的控件**不经过 `ApplyCommonStyle`**（该函数只有 `compiler.cpp:920` 与 `widget_factory.cpp:1363` 两个调用点）→ **没有 CSS** → flex 容器里**尺寸为 0** → 列表区空白 |
+> | v2（D12-1，当前生效） | **`.uix` 里静态声明 `<custom id="list_host" class="list-host"/>`**；Rust 取句柄后挂 `ui_custom_on_draw` | — |
+> | v3（2026-11-13，本轮） | **id 以资产为准 = `list_host`**（不是 `file_list`；命名规则 `<区域>_host`） | id 是 Rust ↔ `.uix` 的契约（`find_by_id` / `on_widget_mount` / `<menu trigger="#…">` 三处都用）→ 不能各写各的 |
+> | v3（同轮追加） | 页面重建后**必须在新 page 上重新注册 `ui_page_on_widget_mount`** | 钩子挂在**具体 page** 的 `PageState` 上（`page_api.cpp:850-854`）→ 新 page 的钩子表是空的 → **不自动转移**（catch-up 只保证「注册即触发」） |
+>
+> ★ **不变的部分**：**状态留 Rust**、`.uix` 只做静态布局、**行**不由 `.uix` 创建（D-15 不变）。
+
 具体分工：
 
 | 归属 | 内容 |

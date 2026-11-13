@@ -44,6 +44,18 @@
 
     三、主题 token：全部改用 --app-* 前缀，避开 core-ui 自有的 34 个库 token，
       详见 docs/12-UIX-TAG-FIX.md 与 assets/themes.json。
+
+    四、宿主标签（第五轮按「内容是不是 Rust 用绘制指令画出来的」判定）
+      preview_body 是图片位 → Rust 在 draw 回调里 blit → <custom>
+      （架构未点名本文件，按同一条规则推出；若裁决不同请告知，改回一行即可）
+
+    五、宿主标签（交付总监第四轮裁定的通用规则）
+      凡是由 Rust 自绘内容的宿主容器 → 必须是 <custom>；由 core-ui 内置控件
+      填充的宿主 → 用 <div>。<div> 拿不到绘制回调（ui_custom_on_draw 内部是
+      As<ui::CustomWidget>，取不到就静默 no-op），且运行时挂载的控件没有
+      CSS 级联结果 → flex 规则失效 → 尺寸 0 → 区域空白且无任何报错。
+      本文件的 preview_body 由 core-ui 控件填充（<gh-img-view> 等，架构 D06）
+      → 保持 <div>。
 -->
 <window title="预览" width="320" height="600" />
 <style>
@@ -79,7 +91,7 @@
       <span id="preview_title" class="preview-title">预览</span>
     </div>
     <div class="divider" />
-    <div id="preview_body" class="preview-body" />
+    <custom id="preview_body" class="preview-body" />
     <label id="preview_hint" class="preview-hint">选中单个文件以预览</label>
     <label id="preview_channel" class="preview-hint" />
     <label id="preview_size" class="preview-hint" />

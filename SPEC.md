@@ -57,7 +57,7 @@
 ┌──────────────────────────────────────────────────────────────────────┐
 │  core-ui.dll (CI 从 pinned revision 构建)                            │
 │  ① .uix 静态布局（标签/样式/token）                                  │
-│  ② <custom id="file_list"> → ui_custom_on_draw → Rust 画行           │
+│  ② <custom id="list_host"> → ui_custom_on_draw → Rust 画行         │
 └──────────────────────────────────────────────────────────────────────┘
 
 旁路：
@@ -81,7 +81,7 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 
 ## 2. 决策索引
 
-### 2.1 已定（D00–D11）
+### 2.1 已定（D00–D20）
 
 | # | 决策 | 状态 | 一句话 | 代价 |
 |---|---|---|---|---|
@@ -91,13 +91,21 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 | **D03** | core-ui = **CI 从源码构建** | 已定 | `packaging/core-ui-revision.txt` 钉 revision | CI 需 VS2022 + LLVM + CMake + Ninja；`rc.exe` 挂起须换 `llvm-rc` |
 | **D04** | 文件列表 = **core-ui 全自绘** | 已定 | `<custom>` + Rust `ui_custom_on_draw` | 自研虚拟列表全套交互；导航树连带不能嵌 |
 | **D05** | 交付形态 = **唯一 `full` edition + `windows-x64`** | 已定 | 删掉多 edition 矩阵 | 上游 CI 两步「多 edition」步骤要删 |
-| **D06** | 预览 = **分三层** | 已定 | 图片**留 core-ui 内**（WIC 解码 + `ui_image_set_pixels`）/ 文本留 core-ui 内 / Office·WPS 降级为「用系统程序打开」/ GuoheView **只做外部 exe** | 不做 ghde 解码（闭源无 ABI）；HEIC/AVIF/PSD/RAW/JXL 进程内不做 |
+| **D06** | 预览 = **分三层** | 已定 | 图片**留程序内**（WIC 解码 → BGRA 预乘 → **Rust 在 `<custom id="preview_image">` 里 blit**，D06-1 机制细化）/ 文本留 core-ui 内 / Office·WPS 降级为「用系统程序打开」/ GuoheView **只做外部 exe** | 不做 ghde 解码（闭源无 ABI）；HEIC/AVIF/PSD/RAW/JXL 进程内不做；**缩放/平移要自己实现**（首版只 fit） |
 | **D07** | 导航树 = **`<custom>` 自绘 + Rust `IShellItem` 枚举** | 已定 | 兜底 = 收藏 + 面包屑 | 丢原生树的「快速访问」自动排序 |
-| **D08** | FFI = **手写 extern + 运行时符号表** | 已定 | 必需缺失即失败；可选缺失即降级 | 无编译期签名检查 → 用门禁 S8 补偿 |
+| **D08** | FFI = **手写 extern + 运行时符号表** | 已定 | 必需缺失即失败；可选缺失即降级；**12 个「头文件漏声明」的符号已可正常绑定**（签名取自 `src/ui/ui_api.cpp`） | 无编译期签名检查 → 用门禁 S8 补偿；签名有两个来源 |
 | **D09** | 链接 = **运行时 `LoadLibrary`**（不链 `core-ui.lib`） | 已定 | 显式限定搜索路径 | 失去编译期类型检查 |
-| **D10** | 主题 = **库接管**，Rust 调 `ui_theme_set_mode` | 已定 | 16 个 token 改名 `--app-*`；accent 走库 token + `ui_theme_set_accent_hex` | 无运行时 CSS 变量 API → 页面用 `ui_page_load_string` 注入 `:root`；切明暗须**重建页面** |
+| **D10** | 主题 = **库接管**，Rust 调 `ui_theme_set_mode` | 已定 | 16 个 token 改名 `--app-*`；accent 走库 token + `ui_theme_set_accent_hex` | 无运行时 CSS 变量 API → 页面用 `ui_page_load_string` 注入 `:root`（**必须在 `<style>` 块内**，否则整页失败；且必须是源码里**第一个** `:root` —— core-ui 自定义属性**先定义者赢**）；切明暗须**重建页面** |
 | **D11** | 目录结构 + 迁移矩阵 + 里程碑落地 | 已定 | **保留上游 5 个 crate 名 + 新增 `zsdesk-coreui`**；138 文件四档；M0~M3 | 约 5,900–10,600 行新增 [估算] |
-| **D12** | `.uix` 资产契约 + 自绘挂载选型 | 已定 | 选 **(b) `.uix` 里声明 `<custom>`**（静态声明）；`<window>` 必须自闭合；文字用元素内文本节点；根样式用 `.root` class | `.uix` 资产需多一次机械评审；根 `<div>` 要显式加 `class="root"` |
+| **D12** | `.uix` 资产契约 + 自绘挂载选型 | 已定 | 选 **(b) `.uix` 里声明 `<custom>`**（静态声明，id = `list_host`）；`<window>` 必须自闭合；文字用元素内文本节点；根样式用 `.root` class；**布局分隔线用 1px `<div class="sep"/>`**；**宿主标签按「是否 Rust 自绘」判定**（`nav_host`→`<custom>`、`breadcrumb`→`<label>`、`preview_host`→`<div>`+`<custom id="preview_image">` 子宿主 + 4 个 `<label class="preview-meta">`）；**页面重建后 32 个句柄 + 挂载钩子必须全部重取/重注册** | `.uix` 资产需多一次机械评审；根 `<div>` 要显式加 `class="root"`；切主题必须重建页面 + 重取句柄（漏一个 = 写野内存） |
+| **D13** | 无障碍与窗口材质 → **接受降级并记录** | 已定 | core-ui 无 UIA / 无系统色感知 / 无 Mica 入口 → **高对比度、读屏、Mica/Acrylic 全部不可实现** | 三项能力缺失，**必须**写进 `DELIVERY.md` 与 `README-FORK.md`；上游补 UIA 时复评 |
+| **D14** | 品牌色 → **Rust 侧读系统 `AccentColor`** | 已定 | 读注册表 `HKCU\...\Explorer\AccentColor`（**BGR 序**）→ `#RRGGBB` → `ui_theme_set_accent_hex()` → 库 token `--accent`；读不到回退 `themes.json` 的 `--app-accent` | Rust 侧多一处注册表读取；BGR 写反会变橙色系；切模式后必须重读重调 |
+| **D15** | `.uix` 通道与深浅色的**五条契约口径**（F1~F5） | 已定 | F1 `:root` 注入 / F2 切主题必须重建页面 / F3 重建后 32 个句柄全失效 / F4 字体不触发重建 / F5 accent 跨模式保留 → 切主题要**重读重调** | ⚠️ **F1 的「注入位置」已被 D20 取代**（first-wins 下放块尾仍会被页面自己的 `:root` 抢先）；F1 其余部分有效 |
+| **D16** | 戳记口径 + S13 门禁口径 | 已定 | 戳记 = **单行 SHA**（M0 由 CI 代写但必须机器断言，M1 改 Rust `build.rs` 产出）；S13 = 两条可机械判死的规则 | M0→M1 要换产出方 |
+| **D17** | CI 日志截断的根因与修法 | 已定 | `shell: pwsh` 注入 `$ErrorActionPreference='stop'` × PS7.4+ 的 `$PSNativeCommandUseErrorActionPreference=$true` → clang-cl 写一行 warning 就被判失败 → **真实诊断从未落盘**；修法：core-ui job 第一行 `Continue` + `$false`；annotation 正则 `-match` → `-cmatch` | 不修则 CI 报「编译错误」而实际**看不到任何错误** |
+| **D18** | **门禁必须在 CI 里真正执行** | 已定 | 资产类五道门进 `rust` job（`::error::` 暴露是哪一条）+ 第六道 `ui_id_manifest_check.py`；**解析 id 必须先剥 HTML 注释** | 门禁不在 CI 里跑 = 只是建议 |
+| **D19** | **S7' 的判定基准** | 已定 | 基准 = **同一 checkout 里 `src/` 的 `UI_API` 定义集**（不用 `docs/05` 的本机 346 基线、不用漏声明 12 个符号的头文件；`ui_dialog` 容忍并报告） | 跨版本比对只会得到「版本漂移」 |
+| **D20** | **`:root` 注入形态 = 甲** | 已定 | 在**源码最前面**插入一个完整的 `<style>` 块（因为自定义属性**先定义者赢**） | 形态乙合法但脆弱；裸放顶层 = 整页失败 |
 
 > 每条的完整记录（背景 / 备选 / 后果）见 `DECISIONS.md` 与 `spec/adr/`。
 
@@ -117,11 +125,11 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 
 | 契约 | 文件 | 编号 | 覆盖的决策 |
 |---|---|---|---|
-| 目录与分层 | `spec/crate-layout.md` | ZC-LAYOUT-001 | D11 |
-| FFI 与呈现层 | `spec/ffi-core-ui.md` | ZC-FFI-001 | D05 / D06 / D07 / D08 / D09 / D10 |
+| 目录与分层 | `spec/crate-layout.md` | ZC-LAYOUT-001 | D11 / **D14**（§4.4 启动初始化落点） |
+| FFI 与呈现层 | `spec/ffi-core-ui.md` | ZC-FFI-001 | D05 / D06 / D07 / D08 / D09 / D10 / **D13** / **D14** |
 | 迁移矩阵 | `spec/migration-matrix.md` | ZC-MIG-001 | D01 / D11 |
-| CI 与打包（**目标态 vs 当前态 两栏**） | `spec/ci-contract.md` | ZC-CI-001 v3 | D03 / D05 / D09 / D11 |
-| 里程碑 | `spec/milestones.md` | ZC-MILESTONE-001 | D11 |
+| CI 与打包（**目标态 vs 当前态 两栏**） | `spec/ci-contract.md` | ZC-CI-001 v3 | D03 / D05 / D09 / D11 / **D13**（§4.6c 交付条款） |
+| 里程碑 | `spec/milestones.md` | ZC-MILESTONE-001 | D11 / **D13**（§8 已知限制清单） / **D14**（V1.11） |
 | 绑定骨架（代码） | `spec/rust-ffi-skeleton/` | — | D08 / D09 |
 
 ### 3.1 十个技术问题的结论（速查）
@@ -131,13 +139,13 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 | T1 | 状态归属 | **留 Rust**。`.uix` 只做静态布局 + 视图局部态；文件列表**不在 `.uix` 里**，是 `<custom>` 由 Rust 画。判据：42,150 行 Rust 里 `zsdesk-core`(1,999 行) 本就不依赖 UI 框架，搬到 JS = 重写整个领域层 |
 | T2 | 预览 | **分三层**：图片留 core-ui 内（`ui_image_view` + WIC → `ui_image_set_pixels`，**符号已核实存在**）/ 文本留 core-ui 内 / Office·WPS 外部打开 / GuoheView 只做外部 exe |
 | T3 | 导航树 | **`<custom>` 自绘** + Rust `IShellItem` 枚举；兜底 = 收藏 + 面包屑 |
-| T4 | 自绘文件列表 | **`<custom id="file_list" class="list-host"/>`（静态声明，D12-1）** + Rust 虚拟化；图标走 `IShellItemImageFactory` → BGRA；拖出走 OLE `DoDragDrop`；右键菜单走 `.uix` 声明式 `<menu>` |
+| T4 | 自绘文件列表 | **`<custom id="list_host" class="list-host"/>`（静态声明，D12-1；id 以资产为准）** + Rust 虚拟化；图标走 `IShellItemImageFactory` → BGRA；拖出走 OLE `DoDragDrop`；右键菜单走 `.uix` 声明式 `<menu>` |
 | T5 | FFI 绑定 | **手写 extern + 运行时符号表**；UTF-8/UTF-16 **逐函数不同**；内存三分类；调用收敛 UI 线程；版本按**符号存在性**协商 |
 | T6 | CRT 与链接 | **运行时 `LoadLibrary`**；三方统一 `/MD`；**谁分配谁释放**；S7 用 `dumpbin /dependents` 机器校验 |
 | T7 | CI 契约 | 3 个 job（`rust` / `core-ui` / `package`）**互不依赖**；门禁 S1~S13 |
 | T8 | 迁移矩阵 | 138 文件 → 直接复用 68 / 改造 56 / 重写 10 / 删除 4 |
 | T9 | 目录结构 | 保留上游 5 crate 名 + 新增 `zsdesk-coreui`；CI 工作区 `app/`+`zsui/`+`core-ui/` 三级同级；`.uix` 在 `assets/`；单向依赖 |
-| T-新增 | `.uix` 资产契约 | `<window>` 自闭合（否则**整页失败**）；文字写元素内文本节点（`text=` 无效）；根样式用 `.root` class（`window{}` 匹配 0 个节点，`:root{}` 只定义变量） |
+| T-新增 | `.uix` 资产契约 | `<window>` 自闭合（否则**整页失败**）；文字写元素内文本节点（`text=` 无效）；根样式用 `.root` class（`window{}` 匹配 0 个节点，`:root{}` 只定义变量）；**`:root` 注入必须包在 `<style>` 块内**（裸放顶层 → `unexpected content at top level` → 整页失败），且只放 CSS 变量 |
 | T10 | 里程碑 | M0↔P1 / M1↔P2 / M2↔P3 / M3↔P4 |
 
 ---
@@ -205,6 +213,16 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 [人话] 用户 fork 路线图里那条被本次对话的决定顶掉了
 [决定] 冲突时以对话为准，并在下游文档标注被覆盖的位置
 [代价] 低：避免两份文档各说一套
+
+[术语] 品牌色（accent）
+[人话] 程序里那个「主色」—— 按钮、选中项、焦点环都是它
+[决定] 跟随 Windows 的系统强调色：Rust 侧读注册表 AccentColor → 调 ui_theme_set_accent_hex 写进库 token --accent；读不到就退回 themes.json 里的 --app-accent（D14）
+[代价] 低：用户换系统主题色，程序跟着变；代价是 Rust 多一处注册表读取，且通道顺序写反会变橙色
+
+[术语] 已知限制
+[人话] 换框架后确实做不到、而且用户能感知到的那几件事
+[决定] 高对比度、读屏、Mica 材质三项列为已知限制（core-ui 无入口），逐条写进 DELIVERY.md 与 README-FORK.md（D13）
+[代价] 中：少三样能力，但写清楚就不会变成「交付后才发现」
 ```
 
 ---
@@ -248,6 +266,8 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 | 5 | 深浅色切换突变（token 撞名） | M1 的 V1.9：切一次主题，截图对比前后两帧 |
 | 6 | `GuoheView.exe` 的命令行参数形式未核实 | M2 第一步：真机 `ShellExecuteW` 传路径，观察是否正确打开；不认则走「exe + 参数」兜底并记录实际形式 |
 | 7 | `zsdesk-app/src/desktop/host.rs`（2,681 行）是最大单文件 | M3 才碰；M0~M2 不动它 |
+| 9 | **`:root` 注入被 `.uix` 自带的 `:root` 抢先 → 静默失效** | core-ui 的自定义属性是**先定义者赢**（`LookupVar` 返回**第一个**命中；`:root` 规则被整条跳过 → 根本不参与 CSS 级联）→ 注入若排在 `.uix` 的 `:root` 之后 → **`.uix` 的值赢** → Rust 的注入被**静默忽略** → 症状「切主题颜色不变」，**零报错** | 注入块插在**源码最前面**；Rust 自检加**顺序断言**（+ 位置/内容/键集共四条）→ M1 的 V1.12 覆盖「`.uix` 自带 `:root` 抢先」这个坏情形 |
+| 8 | **切主题后 32 个句柄失效 → 写野内存** | `ui_page_load_string` 返回新 page，旧控件被销毁；旧句柄继续用 = **静默崩溃 / 花屏，不会报「句柄无效」**。`ui_page_reload` 也重编译（重放旧源码），**同样失效** | M1 的 V1.13：切一次主题 → 状态栏 / 列表 / 预览 / 面包屑**四处都动**；代码里把句柄表收敛到**一个**结构（`page_ctx.rs`），重建走**唯一一条路径**（`spec/ffi-core-ui.md` §4.6） |
 
 ---
 
@@ -262,6 +282,9 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 7. **不实现** core-ui 的 `<gh-img-view>` 瓦块金字塔喂数、OCR（`ui_ocr_img_view_*`）。
 8. **不做** 单文件 exe 分发（`ui_core_embed_binary` 不是 C API）→ 走便携 ZIP + 资源目录。
 9. **不承诺** 本机 GuoheView 目录里的 `core-ui.dll` 与 CI 构建的版本一致 —— 那是**兜底**，不是分发渠道。
+10. **不做** Mica / Acrylic 窗口材质（D13）—— core-ui 无此入口；用户 `docs/07` §4 原文把 Mica 写成「**可选**」且「**不依赖** Acrylic / 模糊」→ 丢掉它**不违背设计意图**。
+11. **不支持** 系统高对比度模式与读屏 / Narrator（D13）—— core-ui 无 UIA 桥接 → 属**已知限制**，必须写进 `DELIVERY.md` 与 `README-FORK.md`（清单见 `spec/milestones.md` §8）。
+12. **不在 core-ui 侧读系统强调色**（D14）—— core-ui 全仓零命中，**「跟随系统 `AccentColor`」由 Rust 侧读注册表实现**。
 
 ---
 
@@ -300,7 +323,7 @@ pwsh scripts/check-coreui-dll.ps1 -DllPath stage/core-ui.dll -RequireBesideExe s
 | 引用 | 改了 Spec 里的哪个值 |
 |---|---|
 | `spec-as-contract` §2「点名文件/模块」 | `spec/ffi-core-ui.md` §6 的绑定清单从「按需再定」改成**逐符号三档清单**（必需 / 可选 / 暂不绑）；`spec/migration-matrix.md` 改成**逐文件四档 + 依赖核对证据** |
-| `spec-as-contract` §2「明确不做」 | `spec/ffi-core-ui.md` §10 新增 6 条 out-of-scope；`SPEC.md` §8 新增 9 条 |
+| `spec-as-contract` §2「明确不做」 | `spec/ffi-core-ui.md` §10 新增 6 条 out-of-scope；`SPEC.md` §8 新增 **12** 条（含 D13 的无障碍/材质降级、D14 的系统色由 Rust 读） |
 | `spec-as-contract` §2「版本锚定」 | `spec/ffi-core-ui.md` §5.4 把版本下限钉死为 **build ≥ 345**（= pinned revision `1840d689…`） |
 | `spec-as-contract` §4「端到端验证步骤」 | `spec/ci-contract.md` §7 与 `spec/milestones.md` §7 各留一条可执行验证（含**关键错误流**） |
 | `runtime-defensive` 第二部分「校验放在边界」 | `spec/ffi-core-ui.md` §3.2 把内存所有权写成**三分类**硬契约 —— 跨 FFI 就是跨信任域；同进程内的 `ui_*` 调用不加防御性噪音 |

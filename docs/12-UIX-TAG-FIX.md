@@ -13,10 +13,11 @@
 |---|---|
 | 修正文件 | `assets/main.uix`、`assets/preview.uix`、`assets/about.uix` |
 | 标签替换 | `<text>`×25、`<hbox>`×8、`<vbox>`×3、`<text-input>`×3、`<panel>`×5、`<vseparator>`×2、`<separator>`×7（**共 53 处**） |
-| 元素总数 | **模板体元素数不变**（main 30→30、preview 9→9、about 16→16）——只换标签，不增删元素。<br>**口径统一**：一律指**模板体**元素数，**不含 4 个 SFC 外壳标签**（`<window>` `<script>` `<style>` `<template>`）；含外壳则是 34/12/19（`docs/11` §2 用的是这个口径，`uix_tag_check.py` 因剥掉 `<script>` 是 33/12/19） |
-| id 保留 | main 21 / preview 6 / about 0 —— **一个没少，一个没改**（Rust 侧 `ui_widget_find_by_id` 不受影响） |
+| 元素总数 | **模板体元素数**：main **35**、preview **9**、about **16**。<br>**口径统一**：一律指**模板体**元素数，**不含 4 个 SFC 外壳标签**（`<window>` `<script>` `<style>` `<template>`）。<br>⚠️ **第七轮起 main 从 30 变成 35**：架构裁定把 `preview_host` 拆成「容器 + `<custom id="preview_image">` + 4 个元信息 `<label>`」⇒ **主动新增 5 个元素**（不是标签替换）。改之前的 30 与原文件一致；改之后 35 = 30 + 5。<br>（含 SFC 外壳则是 39/12/19） |
+| id | main **26** / preview 6 / about 0 —— 原有 **27 个一个没少、一个没改**，第七轮**新增 5 个**（`preview_image` + `preview_host_name/size/channel/state`）⇒ 现共 **32 个**句柄（Rust 侧 `ui_widget_find_by_id` 的目标集合见 §5 R4） |
 | class 保留 | 原有 class 全部保留；**新增 3 个**（`.root`、`.tab-placeholder`、`.nav-hint`）；`.divider` 规则从「只设 background」改为「设 height + background + flex-shrink」（见 §2.6） |
-| 结构级修正 | 6 处（见 §2）——不改设计，只让 core-ui 真正认得 |
+| 结构级修正 | 7 处（见 §2）——不改设计，只让 core-ui 真正认得 |
+| 宿主标签 | **Rust 自绘内容的宿主 → `<custom>`；core-ui 控件填充的宿主 → `<div>`**（§5 R5 的通用规则）。已落：`list_host` / `nav_host` = `<custom>`；`breadcrumb` / `preview_host` = `<div>` |
 | 主题 token | 17 个 token 全部加 `--app-` 前缀（见 §4） |
 | 复核 | QA 第一轮（3 阻塞 + 7 重要 + 5 建议）**已全部处理**；QA 第二轮（B2 / I5 / M06 复核通过）**通过**；交付总监裁决 I4（标题字重）**已落**；架构裁定自绘宿主用 `<custom>` **已落**。逐条对应见 §2.6 / §4.2 / §4.4 / §5 R6/R10 / §6 / §8 |
 | 未验证 | **本机无 Rust/C++ 工具链，全部结论未经编译或渲染验证**；凡推断均标 `[推断]` |
@@ -123,7 +124,7 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 | **依据** | `src/ui/controls.cpp:635-643` `SeparatorWidget::OnDraw` **不调用** `Widget::OnDraw(r)`；而画 `bgColor` 的正是 `Widget::OnDraw`（`src/ui/widget.cpp:328-344`）。对照 `SliderWidget::OnDraw`（`controls.cpp:665-666`）**有**调用 |
 | **后果** | CSS `background` 被写进 `bgColor` 但**永远不会被画出来**。线条颜色写死 `theme::kDivider()`：light = `grey::g82` = **#D1D1D1**，dark = `grey::g26` = **#424242** |
 | **受影响** | 7 处：main 4 处、preview 1 处、about 2 处 —— 它们的 `class="divider"` + `background` **零效果** |
-| **上游正解** | 上游 demo 的水平分隔线**不是** `<separator>`，而是 `<div class="sep"/>` + `.sep { height: 1; background: var(--border-subtle); }`（`demo/ui_demo.uix:426` 等 10 处）—— 与竖线 `.vsep` 同款做法 |
+| **上游正解** | 上游 demo 的水平分隔线**主力是** `<div class="sep"/>` + `.sep { height: 1; background: var(--border-subtle); }`（`demo/ui_demo.uix:203` 定义规则，**19 处**用 `<div class="sep"/>`）—— 与竖线 `.vsep` 同款做法。<br>⚠️ **更正**：我第一轮写「demo 里 `<separator>` 一次都没出现」**不实** —— demo 另有 **3 处真实 `<separator/>`**（`demo/ui_demo.uix:663, 672, 687`），**那 3 处只能渲染成库色**（印证了本条结论，不是反例）。<br>**进一步澄清**（架构侧交叉核对）：那 3 处**全在 `<menu>` 内部** —— 是菜单项之间的分隔线，用库色正好；**布局里的分隔线 demo 一律用 `<div class="sep"/>`**。⇒ 结论不变：**布局里的分隔线要跟项目 token 同色 → 用 `<div>` + `background`**。<br>另：本项目的 7 处用的是**项目 token** `--app-divider`，而不是 demo 的库 token `var(--border-subtle)`。 |
 
 **现写法**（三个文件统一）：
 
@@ -145,6 +146,23 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 
 ---
 
+### 2.7 `.uix` 里**不允许出现深浅色分支**（QA 第四轮查出的硬约束，本轮资产已符合）
+
+`.uix` 的 CSS 选择器**没有主题态位** —— 上游 `src/ui/css/selector.cpp:60-64` 的伪类只认
+**hover / pressed / focus / disabled / checked / root / drag-over**，**没有「深色 / 浅色」这类主题伪类**。
+
+⇒ 以下写法**永远不命中**（静默失效，和 `text=` 属性、`border-bottom`、`<separator>` 的 `background` 同一类坑）：
+
+```css
+.dark { … }                      /* ✘ 不命中 */
+[data-theme="dark"] { … }       /* ✘ 不命中 */
+```
+
+⇒ **深浅色只能靠 Rust 侧重注 `:root` + 重建页面**（§4.4），CSS 侧无能为力。
+本轮三个资产**没有任何主题分支选择器**（只有 `.root` 挂 `--app-*`），符合该约束。
+
+---
+
 ## 3. 逐标签对照表
 
 > 「原:行」= `git show HEAD:assets/<file>` 的行号；「现:行」= 修正后文件的行号。
@@ -154,45 +172,50 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 
 | # | 原标签 | 原:行 | 现标签 | 现:行 | 取舍理由 | 影响面 |
 |---|---|---|---|---|---|---|
-| 1 | `<vbox>` | 45 | `<div class="root">` | 151 | VBox 无对应标签；`<div>` 默认 column = 原 `<vbox>` 语义 | core-ui：同为 VBox。Rust：根节点 id 无（原本也无） |
-| 2 | `<hbox id="titlebar_host">` | 46 | `<div id="titlebar_host" class="titlebar">` | 152 | 横排靠 CSS：`.titlebar` 补 `flex-direction: row` | core-ui：VBox→HBox。Rust：id 不变，句柄照常取 |
-| 3 | `<text class="app-title">` | 47 | `<span class="app-title">tabbed_files</span>` | 153 | 标题栏应用名，短、单行、不占满 → `<span>`（inline 不 stretch）；加 `white-space: nowrap` | core-ui：LabelWidget(inline)。Rust：原本无 id，不影响 |
-| 4 | `<text-input id="global_search">` | 48 | `<input id="global_search">` | 154 | 标签无对应控件；`<input>` → TextInputWidget | core-ui：VBox(空盒)→TextInputWidget。Rust：id 不变 |
-| 5 | `<hbox id="tab_host">` | 50 | `<div id="tab_host" class="tabbar">` | 156 | 同 #2 | 同上 |
-| 6 | `<label id="tab_placeholder">` | 51 | `<label id="tab_placeholder" class="tab-placeholder">…</label>` | 157 | **原就是 `<label>`，保留**；只补 class 拿颜色 + 内部文本 | core-ui：不变。Rust：id 不变 |
-| 7 | `<separator class="divider">` | 53 | `<div class="divider" />` | 159 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token。Rust：无 id |
-| 8 | `<hbox id="command_host">` | 54 | `<div id="command_host" class="commandbar">` | 160 | 同 #2 | 同上 |
-| 9 | `<label id="nav_hint">` | 55 | `<label id="nav_hint" class="nav-hint">…</label>` | 161 | **原就是 `<label>`，保留**；补 class 拿颜色 | 同上 |
-| 10 | `<separator class="divider">` | 57 | `<div class="divider" />` | 163 | 同 #7 | 同上 |
-| 11 | `<hbox id="address_host">` | 58 | `<div id="address_host" class="addressbar">` | 164 | 同 #2 | 同上 |
-| 12 | `<panel id="breadcrumb">` | 59 | `<div id="breadcrumb" class="breadcrumb" />` | 165 | `<panel>` 无对应控件 → `<div>`（column） | core-ui：VBox→VBox。Rust：id 不变 |
-| 13 | `<text-input id="address">` | 60 | `<input id="address">` | 166 | 同 #4 | 同上 |
-| 14 | `<text-input id="search">` | 61 | `<input id="search">` | 167 | 同 #4 | 同上 |
-| 15 | `<separator class="divider">` | 63 | `<div class="divider" />` | 169 | 同 #7 | 同上 |
-| 16 | `<hbox id="infobar_host">` | 64 | `<div id="infobar_host" class="infobar" />` | 170 | 同 #2 | 同上 |
-| 17 | `<hbox class="main-area">` | 65 | `<div class="main-area">` | 171 | 同 #2 | 同上 |
-| 18 | `<panel id="nav_host">` | 66 | `<div id="nav_host" class="nav-host" />` | 172 | 同 #12 | 同上；见 §5 R5（Rust 自绘挂载点） |
-| 19 | `<vseparator class="divider">` | 67 | `<div class="vsep" />` | 173 | `<Separator>` 只有水平形态（`controls.h:200`），竖线用 1px 宽 div：`width:1px; background:var(--app-divider); align-self:stretch; flex-shrink:0` | core-ui：VBox(空盒)→1px 竖条。Rust：无 id，无影响 |
-| 20 | `<panel id="list_host">` | 68 | `<custom id="list_host" class="list-host" />` | 174 | **架构裁定（第三轮）**：列表由 Rust 自绘，宿主必须是 `<custom>` —— `ui_custom_on_draw` 内部是 `As<ui::CustomWidget>(w)`，对 `<div>` 会**静默 no-op**；且运行时 `ui_custom()` 造的控件没有 CSS 级联结果 → 无 flex/width/height → 尺寸 0 → 列表区空白。`<custom>` 则「CSS width/height 走 ApplyCommonStyle 自然生效」（`widget_factory.cpp:1114-1118`）→ `.list-host { flex: 1 }` 生效 | core-ui：VBox→CustomWidget（空的自绘画布）。Rust：id 不变，`ui_page_on_widget_mount(page,"list_host",…)` 取句柄 |
-| 21 | `<vseparator class="divider">` | 69 | `<div class="vsep" />` | 175 | 同 #19 | 同上 |
-| 22 | `<panel id="preview_host">` | 70 | `<div id="preview_host" class="preview-host" />` | 176 | 同 #12 | 同上 |
-| 23 | `<separator class="divider">` | 72 | `<div class="divider" />` | 178 | 同 #7 | 同上 |
-| 24 | `<hbox id="status_host">` | 73 | `<div id="status_host" class="statusbar">` | 179 | 同 #2 | 同上 |
-| 25-30 | `<text id="status_*" class="status-segment">` ×6 | 74-79 | `<span id="status_*" class="status-segment" />` ×6 | 180-185 | 状态栏片段，短、单行、由 Rust 运行时填字 → `<span>`；配 `white-space: nowrap` 防长值折行 | core-ui：VBox(空盒)→LabelWidget(inline)。Rust：id 不变，`ui_label_set_text` 可用 |
+| 1 | `<vbox>` | 45 | `<div class="root">` | 171 | VBox 无对应标签；`<div>` 默认 column = 原 `<vbox>` 语义 | core-ui：同为 VBox。Rust：根节点 id 无（原本也无） |
+| 2 | `<hbox id="titlebar_host">` | 46 | `<div id="titlebar_host" class="titlebar">` | 172 | 横排靠 CSS：`.titlebar` 补 `flex-direction: row` | core-ui：VBox→HBox。Rust：id 不变，句柄照常取 |
+| 3 | `<text class="app-title">` | 47 | `<span class="app-title">tabbed_files</span>` | 173 | 标题栏应用名，短、单行、不占满 → `<span>`（inline 不 stretch）；加 `white-space: nowrap` | core-ui：LabelWidget(inline)。Rust：原本无 id，不影响 |
+| 4 | `<text-input id="global_search">` | 48 | `<input id="global_search">` | 174 | 标签无对应控件；`<input>` → TextInputWidget | core-ui：VBox(空盒)→TextInputWidget。Rust：id 不变 |
+| 5 | `<hbox id="tab_host">` | 50 | `<div id="tab_host" class="tabbar">` | 176 | 同 #2 | 同上 |
+| 6 | `<label id="tab_placeholder">` | 51 | `<label id="tab_placeholder" class="tab-placeholder">…</label>` | 177 | **原就是 `<label>`，保留**；只补 class 拿颜色 + 内部文本 | core-ui：不变。Rust：id 不变 |
+| 7 | `<separator class="divider">` | 53 | `<div class="divider" />` | 179 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token。Rust：无 id |
+| 8 | `<hbox id="command_host">` | 54 | `<div id="command_host" class="commandbar">` | 180 | 同 #2 | 同上 |
+| 9 | `<label id="nav_hint">` | 55 | `<label id="nav_hint" class="nav-hint">…</label>` | 181 | **原就是 `<label>`，保留**；补 class 拿颜色 | 同上 |
+| 10 | `<separator class="divider">` | 57 | `<div class="divider" />` | 179 | 同 #7 | 同上 |
+| 11 | `<hbox id="address_host">` | 58 | `<div id="address_host" class="addressbar">` | 184 | 同 #2 | 同上 |
+| 12 | `<panel id="breadcrumb">` | 59 | `<label id="breadcrumb" class="breadcrumb" />` | 185 | **第七轮（架构裁定）**：面包屑是**文本投影**不是自绘画布 → `<label>`；且原来是**空 `<div>`**（显示不出任何东西，是真缺口）→ Rust 用 `ui_label_set_text(w, L"…")`（UTF-16）填 | core-ui：VBox→LabelWidget（inline）。Rust：id 不变 |
+| 13 | `<text-input id="address">` | 60 | `<input id="address">` | 186 | 同 #4 | 同上 |
+| 14 | `<text-input id="search">` | 61 | `<input id="search">` | 187 | 同 #4 | 同上 |
+| 15 | `<separator class="divider">` | 63 | `<div class="divider" />` | 179 | 同 #7 | 同上 |
+| 16 | `<hbox id="infobar_host">` | 64 | `<div id="infobar_host" class="infobar" />` | 190 | 同 #2 | 同上 |
+| 17 | `<hbox class="main-area">` | 65 | `<div class="main-area">` | 191 | 同 #2 | 同上 |
+| 18 | `<panel id="nav_host">` | 66 | `<custom id="nav_host" class="nav-host" />` | 192 | **宿主标签通用规则（交付总监第四轮裁定）**：导航树由 Rust 自绘（D07）→ 必须 `<custom>`，与列表宿主同源；`<div>` 会尺寸 0 → 左侧导航区空白**且无任何报错** | core-ui：VBox→CustomWidget（空的自绘画布）。Rust：id 不变，`ui_page_on_widget_mount(page,"nav_host",…)` 取句柄 |
+| 19 | `<vseparator class="divider">` | 67 | `<div class="vsep" />` | 193 | `<Separator>` 只有水平形态（`controls.h:200`），竖线用 1px 宽 div：`width:1px; background:var(--app-divider); align-self:stretch; flex-shrink:0` | core-ui：VBox(空盒)→1px 竖条。Rust：无 id，无影响 |
+| 20 | `<panel id="list_host">` | 68 | `<custom id="list_host" class="list-host" />` | 194 | **架构裁定（第三轮）**：列表由 Rust 自绘，宿主必须是 `<custom>` —— `ui_custom_on_draw` 内部是 `As<ui::CustomWidget>(w)`，对 `<div>` 会**静默 no-op**；且运行时 `ui_custom()` 造的控件没有 CSS 级联结果 → 无 flex/width/height → 尺寸 0 → 列表区空白。`<custom>` 则「CSS width/height 走 ApplyCommonStyle 自然生效」（`widget_factory.cpp:1114-1118`）→ `.list-host { flex: 1 }` 生效 | core-ui：VBox→CustomWidget（空的自绘画布）。Rust：id 不变，`ui_page_on_widget_mount(page,"list_host",…)` 取句柄 |
+| 21 | `<vseparator class="divider">` | 69 | `<div class="vsep" />` | 193 | 同 #19 | 同上 |
+| 22 | `<panel id="preview_host">` | 70 | `<div id="preview_host" class="preview-host">`（**容器**） | 196 | **第七轮（架构裁定）**：预览是「图片（Rust blit）+ 元信息（文本）」的**混合** → 按规则拆成 `<div>` 容器 + 里面的 `<custom>` 子宿主 + 预先声明的 `<label>` 元信息行 | core-ui：VBox 容器。Rust：id 不变 |
+| 22a | （新增） | — | `<custom id="preview_image" class="preview-image" />` | 197 | 图片位 —— **Rust 用绘制指令画**（`ui_bitmap_create` → `ui_draw_bitmap_handle`）→ 必须 `<custom>`；`height: 128px` 对应 docs/07 §3 的「图片 ≤128px」上限，fit 缩放由 Rust 算 | core-ui：CustomWidget（空的自绘画布）。Rust：`ui_page_on_widget_mount(page,"preview_image",…)` 取句柄后挂 draw 回调 |
+| 22b | （新增） | — | `<label id="preview_host_name" class="preview-meta" />` | 198 | 元信息行（文件名）—— 文本投影 → `<label>`，Rust 用 `ui_label_set_text` 填 | core-ui：LabelWidget。Rust：id 见 §5 R4 的句柄清单 |
+| 22c | （新增） | — | `<label id="preview_host_size" class="preview-meta" />` | 199 | 元信息行（大小）—— 同上 | 同上 |
+| 22d | （新增） | — | `<label id="preview_host_channel" class="preview-meta" />` | 200 | 元信息行（通道状态）—— 同上 | 同上 |
+| 22e | （新增） | — | `<label id="preview_host_state" class="preview-meta" />` | 201 | 元信息行（状态）—— 同上 | 同上 |
+| 23 | `<separator class="divider">` | 72 | `<div class="divider" />` | 179 | 同 #7 | 同上 |
+| 24 | `<hbox id="status_host">` | 73 | `<div id="status_host" class="statusbar">` | 205 | 同 #2 | 同上 |
+| 25-30 | `<text id="status_*" class="status-segment">` ×6 | 74-79 | `<span id="status_*" class="status-segment" />` ×6 | 206-211 | 状态栏片段，短、单行、由 Rust 运行时填字 → `<span>`；配 `white-space: nowrap` 防长值折行 | core-ui：VBox(空盒)→LabelWidget(inline)。Rust：id 不变，`ui_label_set_text` 可用 |
 
 ### 3.2 `assets/preview.uix`
 
 | # | 原标签 | 原:行 | 现标签 | 现:行 | 取舍理由 | 影响面 |
 |---|---|---|---|---|---|---|
-| 1 | `<vbox>` | 20 | `<div class="root">` | 77 | 同 main #1 | 同上 |
-| 2 | `<hbox class="preview-toolbar">` | 21 | `<div class="preview-toolbar">` | 78 | 横排靠 `.preview-toolbar { flex-direction: row; align-items: center; }` | core-ui：VBox→HBox |
-| 3 | `<text id="preview_title">` | 22 | `<span id="preview_title" class="preview-title">预览</span>` | 79 | 工具条标题，短、单行 → `<span>` | core-ui：VBox→LabelWidget(inline)。Rust：id 不变 |
-| 4 | `<separator />` | 24 | `<div class="divider" />` | 81 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
-| 5 | `<panel id="preview_body">` | 25 | `<div id="preview_body" class="preview-body" />` | 82 | `<panel>` → `<div>` | core-ui：VBox→VBox。Rust：id 不变 |
-| 6 | `<text id="preview_hint">` | 26 | `<label id="preview_hint" class="preview-hint">…</label>` | 83 | 提示行需要**占满宽度并可换行**（Rust 写入的通道名可能较长）→ `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block/stretch)。Rust：id 不变 |
-| 7 | `<text id="preview_channel">` | 27 | `<label id="preview_channel" class="preview-hint" />` | 84 | 同 #6 | 同上 |
-| 8 | `<text id="preview_size">` | 28 | `<label id="preview_size" class="preview-hint" />` | 85 | 同 #6 | 同上 |
-| 9 | `<text id="preview_state">` | 29 | `<label id="preview_state" class="preview-state" />` | 86 | 状态行需占满宽度 → `<label>` + `display: block` | 同上 |
+| 1 | `<vbox>` | 20 | `<div class="root">` | 89 | 同 main #1 | 同上 |
+| 2 | `<hbox class="preview-toolbar">` | 21 | `<div class="preview-toolbar">` | 90 | 横排靠 `.preview-toolbar { flex-direction: row; align-items: center; }` | core-ui：VBox→HBox |
+| 3 | `<text id="preview_title">` | 22 | `<span id="preview_title" class="preview-title">预览</span>` | 91 | 工具条标题，短、单行 → `<span>` | core-ui：VBox→LabelWidget(inline)。Rust：id 不变 |
+| 4 | `<separator />` | 24 | `<div class="divider" />` | 93 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
+| 5 | `<panel id="preview_body">` | 25 | `<custom id="preview_body" class="preview-body" />` | 94 | **第七轮**：图片位由 Rust blit（同 main 的 `preview_image`）→ 按同一条规则应是 `<custom>`。**架构未点名本文件，按同一条规则推出；改回 `<div>` 只是一行** | core-ui：VBox→CustomWidget。Rust：id 不变 |
+| 6 | `<text id="preview_hint">` | 26 | `<label id="preview_hint" class="preview-hint">…</label>` | 95 | 提示行需要**占满宽度并可换行**（Rust 写入的通道名可能较长）→ `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block/stretch)。Rust：id 不变 |
+| 7 | `<text id="preview_channel">` | 27 | `<label id="preview_channel" class="preview-hint" />` | 96 | 同 #6 | 同上 |
+| 8 | `<text id="preview_size">` | 28 | `<label id="preview_size" class="preview-hint" />` | 97 | 同 #6 | 同上 |
+| 9 | `<text id="preview_state">` | 29 | `<label id="preview_state" class="preview-state" />` | 98 | 状态行需占满宽度 → `<label>` + `display: block` | 同上 |
 
 ### 3.3 `assets/about.uix`
 
@@ -202,9 +225,9 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 | 2 | `<text class="heading">` | 15 | `<label class="heading">…</label>` | 60 | 标题虽短，但按「占满宽度」语义统一用 `<label>` + `display: block` | core-ui：VBox(空盒)→LabelWidget(block) |
 | 3 | `<text class="row">`（首条） | 16 | `<label class="row">…</label>` | 61 | 条目是长句（最长达 40+ 汉字），**必须占满宽度才会折行**；若保持 inline，宽度=自然文字宽度 → 横向溢出窗口而不换行 | 同上 |
 | 4 | `<separator />` | 17 | `<div class="divider" />` | 62 | **第二轮修正**：`<separator>` 不画 CSS background（§2.6）→ 改用 1px 的 div | core-ui：SeparatorWidget → 1px 实心 div，颜色走项目 token |
-| 5 | `<text class="row">` ×10 | 18-27 | `<label class="row">…</label>` ×10 | 63-72 | 同 #3 | 同上 |
-| 6 | `<separator />` | 28 | `<div class="divider" />` | 73 | 同 #4 | 同上 |
-| 7 | `<text class="row">`（致谢） | 29 | `<label class="row">…</label>` | 74 | 同 #3 | 同上 |
+| 5 | `<text class="row">` ×10 | 18-27 | `<label class="row">…</label>` ×10 | 61 | 同 #3 | 同上 |
+| 6 | `<separator />` | 28 | `<div class="divider" />` | 62 | 同 #4 | 同上 |
+| 7 | `<text class="row">`（致谢） | 29 | `<label class="row">…</label>` | 61 | 同 #3 | 同上 |
 
 ### 3.4 `<text>` → `<span>` / `<label>` 的逐个取舍原则（25 处）
 
@@ -248,23 +271,36 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 
 #### ⚠️ 注入位置（第二轮由 QA 查出，第一轮我漏了 —— 这是会导致「一个窗口都出不来」的坑）
 
-`:root { … }` **必须拼进 `<style>…</style>` 块内部**（紧跟 `<style>` 开头），
-**绝不能放在源码顶层**：
+`:root { … }` **必须拼进 `<style>…</style>` 块内部**，**绝不能放在源码顶层**。
 
-| 位置 | 后果 | 依据 |
-|---|---|---|
-| **`<style>` 块内部**（正确） | 自定义属性被 `CollectRootVars` 采集 → `var(--app-*)` 正常解析 | `src/ui/css/cascade.h:41-43`（只从 `:root` 采集）、`cascade.cpp:18-33` |
-| **源码顶层**（错误） | `sfc_parser.cpp:260-266` 判 "unexpected content at top level" → `doc.ok=false` → `page_api.cpp:249-255` 返回 "SFC parse failed" → **整页不加载，三个窗口一个都出不来** | `sfc_parser.cpp:260-266` |
+> **第八轮更正注入形态**：Rust 实现走**形态甲** —— 在 `.uix` 源码**最前面插入一个完整的 `<style>` 块**（**不是**「末尾追加」）。
+> **顶层块顺序无关** —— 解析器按标签名分派到各自容器（`<window>` / `<template>` / `<style>` 谁先都行）→ 插最前合法，且**天然保证「注入的是第一个 `:root`」**。
+> 形态乙（插进**第一个** `<style>` 块的**块首**）同样满足口径 ⑤ —— 两者都要求「**此前不能有 `:root`**」。
+>
+> ⚠️ **方向修正**：我第三轮写的「末尾追加」和架构侧上一版契约写的「必须在 source order 上**最后**（后者覆盖前者）」**都是反的**。实际是**先定义者赢**：
+> `LookupVar`（`value.cpp:573-581`）**返回第一个命中**；`cascade.h:41` 注释逐字「**Returns first set encountered.**」；而 `:root` 规则在 `cascade.cpp:124-125` 被**整条跳过**（根本不进 CSS 级联）。
+> ⇒ **注入排在 `.uix` 自己的 `:root` 之后会被静默吃掉** —— 症状是「切主题颜色不变」，**零报错**。
 
-> 报错信息是 "SFC parse failed"，**不像标签问题**，极容易被误判成"改完标签还是出不来"，
-> 然后去反复调标签 —— 所以这条单列。
+**六条硬口径**（与 `spec/ffi-core-ui.md` §4.3.2.1 / `spec/crate-layout.md` §4.3.1 逐字一致）：
+
+| # | 口径 | 违反后果 | 依据 |
+|---|---|---|---|
+| 1 | **拼进 `<style>` 块内** —— Rust 统一**在源码最前面插入**一个完整的 `<style>` 块 | 裸放源码顶层 → `sfc_parser.cpp:260-266` 判 "unexpected content at top level" → `doc.ok=false` → `page_api.cpp:249-255` 返回 "SFC parse failed" → **整页不加载，三个窗口一个都出不来** | `sfc_parser.cpp:260-266` |
+| 2 | **只允许 CSS 变量** —— `:root` 里只写 `--app-*` | 普通声明（`background`/`color`/`font-family`）被**静默丢弃**（`:root` 是伪类，在普通样式计算里被整条跳过） | `cascade.cpp:124-126` |
+| 3 | **根样式走 `.root` class** | `window { … }` 匹配 **0 个节点**（`<window>` 不产生 widget）→ 不报错，只是**不生效** | `sfc_parser.cpp:285-296`、`cascade.cpp:112-145` |
+| 4 | **Rust 侧加载前自检（四条断言）**：**位置**（落在 `<style>` 内）/ **顺序**（注入的是**第一个** `:root`）/ **内容**（只含 `--app-*`）/ **键集**（无 `--app-accent`） | 任一不满足 → fail-fast；否则表现为「颜色不对 / 切主题不变 / 库色混入」，且**零报错** | 同 1 / 2 / 5 / 6 |
+| 5 | **注入必须是「第一个」`:root`** | core-ui 是**先定义者赢** → 注入排在 `.uix` 的 `:root` 之后会被**静默吃掉**（症状：切主题颜色不变，零报错） | `value.cpp:573-581`、`cascade.h:41`、`cascade.cpp:124-125` |
+| 6 | **键集排除 `--app-accent`** | 它是 D14 的**回退源值**（数据字段，不是 CSS 变量），由 Rust 读出后直接喂 `ui_theme_set_accent_hex()`；混进 `:root` 会让「库 token `--accent`」与「项目 `--app-accent`」两套值并存 → 库控件与自绘区颜色分裂 | 架构 D14；`assets/themes.json` `revision.decision` |
+
+> **当前前提成立**：实测三个 `.uix` 剥注释后**生效 `:root` 规则数 = 0**（`main.uix` 那 3 处命中全在 HTML 注释里）→ 现在不会出问题。
+> 这是把一个**将来会静默咬人**的缺口提前钉住（Rust 侧自检四条断言见口径 ④）。
 
 **三种失败模式（都是静默或误报型的）**：
 
 | 失败模式 | 现象 | 定位 |
 |---|---|---|
 | 顶层注入 | "SFC parse failed" → 一个窗口都出不来 | 看 `ui_page_last_error()` |
-| 完全没注入 | **静默**：界面能出来，但所有 `var(--app-*)` 解析成空串（`cascade.cpp:79-81` → `ParseColor("")` 失败）→ 全是库默认色（纯白底 / `#424242` 文字 / `#D1D1D1` 分隔线） | 比对颜色与 `themes.json` |
+| 完全没注入 | **静默**：界面能出来，但所有 `var(--app-*)` 解析成空串（`cascade.cpp:79-81` → `ParseColor("")` 失败）→ 全是库默认色：窗口底 = 库 `windowBg` 纯白 `#FFFFFF` / 文字 = 库 `kBtnText()` **`#242424`**（`controls.cpp:61-68`）/ **分隔线直接消失**（分隔线已是 `<div class="divider">`，`--app-divider` 未定义 → `background` 解析失败 → 画不出来；**不会再出现库色 `#D1D1D1`**） | 比对颜色与 `themes.json`；看不到分隔线本身就是信号 |
 | 注入晚于 `ui_page_load_string` | 同上，静默回落到库默认色 | 比对时序 |
 
 → 三条都已写进 `assets/themes.json` 的 `revision.inject_failure_modes` 与 `docs/13` §0 上机前准备清单。
@@ -282,7 +318,7 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 | 5 | `--text` | `--app-text` | 改名避让 | 库用 `--fg`，本项目用 `--text`；统一命名空间以免两套前景色 token 并存 |
 | 6 | `--text-secondary` | `--app-text-secondary` | 改名避让 | 同上 |
 | 7 | `--divider` | `--app-divider` | 改名避让 | 库用 `--border`；统一命名空间 |
-| 8 | `--accent` | `--app-accent` | **改用库 token**（CSS 侧读 `var(--accent)`，不自定义） | accent 是**唯一有官方通道**的 token：`ui_theme_set_accent_hex()` 会写进库 palette 并同步到库 token `--accent`（`ui_api.cpp:2571-2587` → `theme::SetAccent` → `RefreshAllPageThemes` → `RebuildThemeVars`），且**跨 `ui_theme_set_mode` 保留**（`theme.h:435-439`）。若自定义 `--app-accent`，库自绘控件（primary 按钮 / 焦点环 / 滑块 / 进度条）仍是库默认蓝 `#3971EC`，与自绘区的 `#2563EB` 撞成两种蓝 |
+| 8 | `--accent` | `--app-accent`（**仅回退源值**） | **改用库 token**（CSS 侧读 `var(--accent)`，**不读** `var(--app-accent)`） | accent 是**唯一有官方通道**的 token：`ui_theme_set_accent_hex()` 会写进库 palette 并同步到库 token `--accent`（`ui_api.cpp:2571-2587` → `theme::SetAccent` → `RefreshAllPageThemes` → `RebuildThemeVars`），且**跨 `ui_theme_set_mode` 保留**（`theme.h:435-439`）。若自定义 `--app-accent`，库自绘控件（primary 按钮 / 焦点环 / 滑块 / 进度条）仍是库默认蓝 `#3971EC`，与自绘区的 `#2563EB` 撞成两种蓝。<br>**第三轮补充（交付总监 D14）**：core-ui **根本不读系统强调色** —— 全仓无 `GetSysColor` / `UISettings` / `AccentColor`，`theme.h:446-455` 的 `SetAccent` 只接受外部传入值 → docs/07 §4「跟随系统 `AccentColor`」**只能由 Rust 实现**：读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\AccentColor`（DWORD，**BGR 序**）→ 转 hex → `ui_theme_set_accent_hex()`；读不到才回退到 `--app-accent`。**因此 `--app-accent` 的定位是「读不到系统色时的回退源值」，不是主源值。**<br>**并且它是【数据字段，不是 CSS 变量】** —— Rust 读出后直接喂 `ui_theme_set_accent_hex()`，**不进 `:root`**（见 §4.2 口径 ③）；任何 `.uix` 里都不得出现 `var(--app-accent)`。 |
 | 9 | `--hover` | `--app-hover` | 改名避让 | 库有 `--btn-hover`，语义不同；统一命名空间 |
 | 10 | `--pressed` | `--app-pressed` | 改名避让 | 库有 `--btn-press`；同上 |
 | 11 | `--selection-bg` | `--app-selection-bg` | 改名避让 | 库有 `--accent-selected`，语义不同；同上 |
@@ -305,16 +341,16 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 | **切换时（项目）** | — | ⚠️ **不会自动跟随**：`:root` 的值是静态的 | — |
 | **项目 token 要跟随怎么办** | — | **必须重建页面**：Rust 用另一套 `--app-*` 重新拼 `:root` 并 `ui_page_load_string()` 新页（`ui_page_reload()` 会重放**旧源码**，改不了 palette） | — |
 
-#### ⚠️ 重建页面的副作用：27 个句柄全部失效（第二轮由 QA 查出）
+#### ⚠️ 重建页面的副作用：32 个句柄全部失效（第二轮由 QA 查出；第七轮由 27 更新为 32）
 
 `ui_page_load_string()` 返回的是**一个全新的 page**。旧 page 里的
-**27 个 `ui_widget_find_by_id` 句柄（main 21 + preview 6）全部失效**，
+**32 个 `ui_widget_find_by_id` 句柄（main 26 + preview 6）全部失效**，
 且旧 page 必须显式 `ui_page_destroy`。
 
 → **切主题后 Rust 侧必须做三件事**（已登记为 §5 R4）：
 
 1. `ui_page_destroy(旧 page)` —— 不销毁就是句柄 + 内存双泄漏；
-2. **重新 `ui_widget_find_by_id` 取全部 27 个句柄** —— 旧句柄指向已销毁的控件，
+2. **重新 `ui_widget_find_by_id` 取全部 32 个句柄** —— 旧句柄指向已销毁的控件，
    继续用会写到野内存（静默崩溃 / 花屏，不会报"句柄无效"）；
 3. 重新挂载回调与自绘状态（列表、导航、面包屑、预览）。
 
@@ -333,7 +369,7 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 4. 拼 ":root { --app-bg: …; … }" 注入 .uix 源码 → ui_page_load_string(...)
 ```
 
-> 第 2 步必须在第 3 步**之前或紧邻**：切 mode 会用当前 accent override 重新派生（`theme.h:435-439`），若顺序反了会拿到上一次的 accent。
+> 第 2 步必须在第 3 步**之前或紧邻**：切 mode 会用**同一个 accent 基色**重新派生 hover/press/text 变体，**基色本身不变**（`theme.h:435-439` 的 `SetMode` → `ApplyAccent(AccentOverrideValue())`，用的是同一个 override 值）⇒ 顺序反了会拿到**上一次的基色**。
 > 第 3 步不能省：省了的话 `var(--accent)` 落到库默认 `#3971EC`，与设计稿的 `#2563EB` 不符（表现为「自绘区蓝、按钮蓝」不一致）。
 
 ### 4.5 `assets/themes.json` 的改动
@@ -352,12 +388,13 @@ docs/11 §2.1 的 6 条规则只解决「标签不被识别」。实读上游后
 | R1 | **Rust 必须在 `ui_page_load_string` 前注入 `:root` 块**（读 `themes.json` → 拼 CSS → 拼进 `.uix` 源码） | §4.2：无运行时变量 API | `crates/zsdesk-ui/` 的页面装配处 |
 | R2 | **`ui_theme_set_accent_hex` 必须调用**，否则 accent 与设计稿不符 | §4.3 #8 | 同上，主题初始化处 |
 | R3 | **`ui_theme_set_default_font` / `ui_theme_set_cjk_font` 必须调用** | `font-family` 对普通 LabelWidget 不生效（§1） | 同上 |
-| R4 | **深浅色切换需重建页面**（不能只调 `ui_theme_set_mode`）；且重建后**必须 `ui_page_destroy` 旧 page + 重取全部 27 个 `ui_widget_find_by_id` 句柄 + 重挂回调**（新 page ⇒ 旧句柄全部失效） | §4.4 | 主题切换处 |
-| R10 | **`.tab-active` / `.cmd-button` / `.cmd-group` / `.infobar-visible` / `.preview-collapsed` 五条 class 规则当前无任何元素引用**（标签条与命令栏由 Rust 自绘），且 core-ui **没有运行时设置 class 的 C API**（`include/ui_core.h` 内无相关符号；`dynamicClasses` 只来自 `:class` 绑定）→ 这五条是**绘制 / 状态规范参照**，不是生效的 CSS（`.tab-active` `.cmd-button` `.cmd-group` 是标签条与命令栏的绘制规范；`.infobar-visible` `.preview-collapsed` 是两个状态的尺寸规范，Rust 侧需直接改高度 / 宽度，见 R7）。已在三个 `.uix` 里逐条加注释标明。另：`.tab-active` 里的 `var(--accent)` 是**库 token**（随 `ui_theme_set_mode` 切换），与其余 `--app-*`（不跟随）刻意分属两个命名空间 —— 指示条本就该跟随系统主题 | 第二轮由 QA I7 查出；`src/ui/page/compiler.cpp:859`（dynamicClasses 来源） | Rust 侧 `src/ui/tabbar.rs` / `toolbar.rs` 实现时按此对齐 |
-| R5 | **列表/导航/面包屑自绘的挂载方式**：`ui_custom_on_draw` 只对 CustomWidget 生效（`ui_api.cpp:2612-2616` 的 `As<ui::CustomWidget>` 取不到就**静默 no-op**），`<div>` 宿主拿不到绘制回调 | `ui_custom(void)`（`ui_core.h:1415`）+ `ui_widget_add_child(parent, child)`（`ui_core.h:1083`）可运行时创建并挂载 | 虚拟列表 / 导航树 |
-| R6 | **`.tab-active` 的 2px accent 指示条**：core-ui 不支持 `border-bottom` | `widget_factory.cpp:631-653` | 由 Rust 自绘，或在 `.uix` 里加 2px 高的 `<div>` |
+| R4 | **深浅色切换需重建页面**（不能只调 `ui_theme_set_mode`）；且重建后**必须 `ui_page_destroy` 旧 page + 重取全部 32 个 `ui_widget_find_by_id` 句柄（main 26 + preview 6）+ 在新 page 上重新注册 `ui_page_on_widget_mount` + 重挂回调**（新 page ⇒ 旧句柄全部失效；mount 钩子也不转移） | §4.4 | 主题切换处 |
+| R10 | **剩余四条无元素引用的 class 规则**：`.cmd-button` / `.cmd-group`（标签条与命令栏的**绘制规范**，Rust 自绘时按此对齐）+ `.infobar-visible` / `.preview-collapsed`（两个**状态**的尺寸规范，Rust 需直接改高度 / 宽度，见 R7）。core-ui **没有运行时设置 class 的 C API**（`include/ui_core.h` 内无相关符号；`dynamicClasses` 只来自 `:class` 绑定）→ 这四条**不会由 `.uix` 渲染**。已在三个 `.uix` 里逐条加注释标明。<br>（`.tab-active` 已在第三轮删除，理由见 R6 —— 它额外踩了「不受支持的 `border-bottom`」和「命名空间混用」两个坑。） | 第二轮由 QA I7 查出；`src/ui/page/compiler.cpp:859`（dynamicClasses 来源） | Rust 侧 `src/ui/tabbar.rs` / `toolbar.rs` / `preview_pane.rs` |
+| R11 | **Rust 加载前自检要加第 3 条断言：「注入的 `:root` 必须是源码中第一个 `:root`」** —— 自定义属性**先定义者赢**（`LookupVar` 返回第一个命中，`value.cpp:573-581`；`cascade.h:41`「Returns first set encountered.」；`:root` 规则不进 CSS 级联，`cascade.cpp:124-125`）⇒ 若 `.uix` 自带 `:root` 且排在注入块之前，**注入的值被静默忽略**（不报错、不告警）。现有 V1.12 只测「裸放顶层」一种坏情形，**测不到**这一种。<br>**当前前提成立**：三个 `.uix` 剥注释后生效 `:root` 规则数 = 0 ✓（`main.uix` 那 3 处命中全在 HTML 注释里） | `value.cpp:573-581`、`cascade.h:41`、`cascade.cpp:124-125` | Rust 侧加载前自检（并入 V1.12） |
+| R5 | **宿主标签通用规则（交付总监第四轮裁定）**：**凡是由 Rust 自绘内容的宿主容器 → 标签必须是 `<custom>`；由 core-ui 内置控件填充的宿主 → 用 `<div>`。**理由：`<div>` 拿不到绘制回调（`ui_custom_on_draw` 内部是 `As<ui::CustomWidget>`，取不到就**静默 no-op**），且运行时挂载的控件**没有 CSS 级联结果** → flex 规则失效 → 尺寸 0 → **区域空白且无任何报错**。<br>按此规则逐个判定（判定来源见架构 D06 / D07 / D12）：<br>· `list_host`（Rust 自绘文件列表，D12）→ **`<custom>`** ✔ 已改<br>· `nav_host`（Rust 自绘导航树，D07）→ **`<custom>`** ✔ 已改<br>· `breadcrumb`（core-ui 控件填充：标签序列）→ `<div>` 保持<br>· `preview_host`（core-ui 控件填充：`<gh-img-view>` 等，D06）→ `<div>` 保持<br>`<custom>` 的 CSS 宽高**会**生效（`widget_factory.cpp:1114-1118`「CSS width/height 走 ApplyCommonStyle 自然生效」）→ `.list-host { flex: 1 }` / `.nav-host { width: 220px }` 均生效。<br>⚠️ **「自动回填」只覆盖一半**（架构第四轮澄清）：`ui_page_on_widget_mount` 的钩子在**新 page 上会重新触发** → **自绘控件的绘制回调自动回填 ✅**；但 Rust 自己持有的 `ui_widget_find_by_id` 句柄**不会自动更新 ❌** → 必须**主动重取全部 27 个句柄**（旧句柄 = 写野内存 = 静默崩溃/花屏，**不会报「句柄无效」**）。<br>⚠️ **做不到的一条**：core-ui **没有读回 CSS 变量的 C API**（导出面只有 `ui_widget_set_bg_color` / `set_text_color` 这类写接口，无 `get_style`/`get_var`/`computed`）→ 「压根没注入」这个静默项只能靠**离屏渲染取一个已知像素**与 `themes.json` 比对（一次性冒烟，**不进启动路径**）；**不要为此造读回 hack**。 | 架构裁定（`spec/ffi-core-ui.md` §4.3.3）+ 交付总监第四轮裁定 | 虚拟列表 / 导航树 |
+| R6 | **`.tab-active` 规则已从 `.uix` 删除**（第三轮，交付总监裁定）：它同时踩三个坑 —— ① core-ui 不支持 `border-bottom`（`widget_factory.cpp:631-653` 只认 border / border-color / border-width / border-radius）② `var(--accent)` 是库 token，与其余 `--app-*` 混用两个命名空间 ③ **没有任何元素使用这个 class**（标签条由 Rust 自绘）。删除后不丢设计意图：docs/07 §2 的「选中标签底部 2px accent 指示条」由 **Rust 自绘**实现，或在 `.uix` 里用 2px 高的 `<div>` | `widget_factory.cpp:631-653`；`docs/07` §2 | `src/ui/tabbar.rs` 自绘 |
 | R7 | **`.infobar` 默认 `height: 0px`**（收起），`.infobar-visible` 36px；两者都无 id 切换机制 → Rust 侧需 `ui_widget_set_visible`（`<div>` 支持 `visible` 静态属性，`widget_factory.cpp:1329-1332`）或直接改高度 | — | 信息条状态机 |
-| R8 | **`.preview-title` / `.heading` 的 `font-weight: 600` 是空声明**：core-ui 对 LabelWidget 只认 `bold` / `700`（`widget_factory.cpp:1392-1395`：`if (fw == "bold" \|\| fw == "700") lbl->Bold();`），`600` 落在 else，**什么都不做** → 这两个标题会按常规字重渲染，层级丢失。<br>**但本轮不擅自改**：docs/07 §4 明写「字重仅 400 / 500」，而 `500` 在 core-ui 同样是空声明；改用 `bold` 又超 docs/07 的上限。三个选项请设计师/架构师裁决：<br>(a) 保持 `600` → 标题按常规字重（现状）<br>(b) 改 `bold` → 恢复强调，但超 docs/07 字重上限<br>(c) 去掉字重、按 docs/07「标题 14px」把标题字号提到 14px → **靠字号与颜色做层级**（与 docs/07 §4 与知识库「字重不许超 500，靠字号和颜色深浅做层级」都一致，推荐此项） | `widget_factory.cpp:1392-1395` | 设计师裁决后再改（属视觉决策，不在机械修正范围） |
+| R8 | **✅ 已裁决并已落地（交付总监 I4，采纳选项 (c)）**：`.preview-title` / `.heading` 的 `font-weight: 600` 是空声明（core-ui 对 LabelWidget 只认 `bold` / `700`，`widget_factory.cpp:1392-1395`）→ 标题本会按常规字重渲染、层级丢失；而 docs/07 §4 明写「字重仅 400 / 500」，**500 同样是空声明** → 改 `bold` 超上限、保持 `600` 也超上限 ⇒ 采纳 (c)：**删掉字重、把标题字号提到 14px，层级靠【字号 + 颜色】**（14px + `--app-text` vs 12px + `--app-text-secondary` vs 13px + `--app-text`）。**已落**：`.heading` 16px→14px 且删 `font-weight`；`.preview-title` 补 `font-size: 14px` 且删 `font-weight`。`docs/13` F3 / F6 / §9-8 同步 | `widget_factory.cpp:1392-1395`；`docs/07` §4 | 已完成（`assets/about.uix` / `assets/preview.uix`） |
 | R9 | **`<input>` 的 CSS `background` 会被采纳**（原先担心的「控件自绘底色盖掉 CSS」不存在）：`TextInputWidget::OnDraw` 优先用 `bgColor`（`controls.cpp:1052-1063`，`customBg = bgColor.a > 0` 时「use it as-is (no state variation)」）→ `.global-search` / `.address` / `.search` 的 `background: var(--app-content-bg)` **生效**；代价是这三个输入框**没有 hover / focus 的底色变化**（只有边框变化）。另外未设 `border-width`/`border-color` 时会走 WinUI 双色边框 + 聚焦 accent 下划线 | `controls.cpp:1045-1085` | 已知取舍，无需改动；真机确认边框观感 |
 
 ---
@@ -374,41 +411,17 @@ python3 scripts/gates/theme_contrast_check.py  # G05 真实渲染关系对比度
 两条都是**失败即停**（退出码非 0）的 L1 静态门，不做编译、不做渲染。
 
 > ⚠️ **第一轮我贴的输出是错的**（QA B3）：贴的是临时脚本的输出，与仓库里的
-> `scripts/gates/uix_tag_check.py` 对不上（开标签+闭标签混算）。本节现贴的是
-> **当前仓库脚本的真实输出**，任何人都能按上面的命令复现。
+> `scripts/gates/uix_tag_check.py` 对不上（开标签+闭标签混算）。
+> **第三轮按交付总监要求改成「命令 + 判定 + 退出码」三行式**（`contract-prose.md`
+> §二.4：给指针不给倾倒）—— 详细输出一律交 CI 存档，避免"文档里贴的数和实跑对不上"
+> 这类问题再次发生。判定条件见下方断言清单。
 
-**`uix_tag_check.py` 真实输出**（退出码 0）：
+**`uix_tag_check.py`**（输出交 CI 存档；本节只给判定条件）：
 
 ```
-
-=== assets/main.uix ===
-  <div> ×18  core-ui 支持
-  <input> ×3   core-ui 支持
-  <label> ×2   core-ui 支持
-  <span> ×7   core-ui 支持
-  <style> ×1   SFC 顶层块
-  <template> ×1   SFC 顶层块
-  <window> ×1   SFC 顶层块
-  ✔ 模板体元素 30 个 / id 21 个 —— 全部检查通过
-
-=== assets/preview.uix ===
-  <div> ×4   core-ui 支持
-  <label> ×4   core-ui 支持
-  <span> ×1   core-ui 支持
-  <style> ×1   SFC 顶层块
-  <template> ×1   SFC 顶层块
-  <window> ×1   SFC 顶层块
-  ✔ 模板体元素 9 个 / id 6 个 —— 全部检查通过
-
-=== assets/about.uix ===
-  <div> ×3   core-ui 支持
-  <label> ×13  core-ui 支持
-  <style> ×1   SFC 顶层块
-  <template> ×1   SFC 顶层块
-  <window> ×1   SFC 顶层块
-  ✔ 模板体元素 16 个 / id 0 个 —— 全部检查通过
-
-PASS —— 三个 .uix 资产：标签全部在 core-ui 支持表内，零遗留旧标签，D-15 合规，id / 元素总数保全。
+$ python3 scripts/gates/uix_tag_check.py
+判定：见下方断言清单，全部 PASS 时退出码 0
+退出码：0
 ```
 
 **断言清单**（脚本内断言，任一不过退出码非 0）：
@@ -422,8 +435,8 @@ PASS —— 三个 .uix 资产：标签全部在 core-ui 支持表内，零遗�
 | `<window>` 均自闭合 | ✅ |
 | `<script>` 含 `export default` | ✅ |
 | 无 `window { }` 选择器 | ✅ |
-| id 集合与取值：main 21 / preview 6 / about 0，与原文件完全一致 | ✅ |
-| **模板体**元素数：main 30 / preview 9 / about 16，与原文件一致（含 SFC 外壳则 33/12/19） | ✅ |
+| id 集合：原有 **27 个（main 21 / preview 6 / about 0）一个没少没改**；第七轮新增 5 个（`preview_image` + `preview_host_*`）⇒ 现 32 个 | ✅ |
+| **模板体**元素数：main **35**（原 30 + 第七轮新增 5）/ preview 9 / about 16（含 SFC 外壳则 39/12/19） | ✅ |
 | 硬编码色值（G02）：三个 `.uix` 内零字面色值，全部走 `var(--app-*)` | ✅ |
 
 **逐标签 → core-ui 支持表 对齐**（三文件并集）：
@@ -440,23 +453,12 @@ PASS —— 三个 .uix 资产：标签全部在 core-ui 支持表内，零遗�
 
 **结论：三个资产里出现的每一个标签都能在 core-ui 支持表里找到落点，无遗留未识别标签。**
 
-**主题门禁真实输出**（`theme_contrast_check.py`，退出码 0）：
+**主题门禁**（`theme_contrast_check.py`，输出交 CI 存档）：
 
 ```
-=== G05 双主题对比度（按 .uix 真实渲染关系计算）===
-  [light] 真实文字元素 55 处，最低 5.78:1（span.app-title #616161 on #F7F7F7）
-        assets/main.uix span.app-title: #616161 on #F7F7F7 = 5.78:1 「tabbed_files」
-        assets/main.uix label.nav-hint: #616161 on #F7F7F7 = 5.78:1 「后退 前进 上级 刷新 · 查看 排序 预览」
-        assets/preview.uix label.preview-hint: #616161 on #FBFBFB = 5.98:1 「选中单个文件以预览」
-  [dark] 真实文字元素 55 处，最低 6.75:1（span.app-title #B3B3B3 on #2B2B2B）
-        assets/main.uix span.app-title: #B3B3B3 on #2B2B2B = 6.75:1 「tabbed_files」
-        assets/main.uix label.nav-hint: #B3B3B3 on #2B2B2B = 6.75:1 「后退 前进 上级 刷新 · 查看 排序 预览」
-        assets/about.uix label.row: #B3B3B3 on #2B2B2B = 6.75:1 「单进程 · Core UI · Rust 原生标」
-
-=== G13 间距刻度 ===
-  非刻度间距：0 处
-
-PASS —— 真实文字元素的对比度全部 ≥ 4.5:1，间距取值全部在刻度上。
+$ python3 scripts/gates/theme_contrast_check.py
+判定：110 对真实渲染配对全部 ≥4.5:1，且 spacing 越界数为 0 时退出码 0
+退出码：0
 ```
 
 > 第二轮重写了这个脚本（QA I5）：第一版验的是**UI 里不存在的组合**
@@ -493,7 +495,7 @@ PASS —— 真实文字元素的对比度全部 ≥ 4.5:1，间距取值全部�
 | **I1** docs/11 §2 计数表有误 | **QA 正确**。实测 text×25 / hbox×8 / vbox×3 / text-input×3 / panel×5 / vseparator×2（+ 第二轮的 separator×7） | docs/11 §2 已回填真实数字，并标注与 docs/12 的对应关系 |
 | **I2** docs/11 §4 M01/M06 已被源码结案 | **QA 正确** | docs/11 §4 M01/M06 已改为「源码级已结案」，并保留真机复验项 |
 | **I3** 切主题重建页面 → 27 个句柄失效 | **QA 正确，补漏了** | docs/12 §4.4 加「重建页面的副作用」专节（destroy + 重取 + 重挂三步）；§5 R4 改写；themes.json `revision.switch` 同步 |
-| **I4** docs/13 F3 与 F6 自相矛盾 | **QA 正确** | F3 改为「16px、**不加粗**（见 F6）」；R8 的三选一保持**未裁决**（等设计师） |
+| **I4** docs/13 F3 与 F6 自相矛盾 | **QA 正确** | **已全部落地**：`.heading` / `.preview-title` 删 `font-weight: 600`、字号按 docs/07 §4 提到 **14px**（选项 (c)，交付总监 I4 裁决）；`docs/13` F3 = 「**14px、不加粗**，靠字号 + 颜色做层级」、F6 = 「**已裁决**」、§9 第 8 条 = 「**已结案**」—— 三处口径一致，`qa_uix_verify.py` 的两条 `font-weight: 600` WARN 随之消失 |
 | **I5** 对比度门禁验了不存在的组合 | **QA 正确** | 脚本重写为按 **DOM 真实渲染关系**计算（元素 color × 最近祖先-or-self background），实测 55 个文字元素 × 2 主题 = 110 对，最低 5.78:1 / 6.75:1，与 QA 独立复算一致 |
 | **I6** `scripts/gates/` 未纳入版本控制 | **QA 正确** | 已 `git add`（连同 docs/12、docs/13） |
 | **I7** `.tab-active` 三重失效 | **QA 正确，前两点我漏了**（`border-bottom` 不支持我已知，命名空间与「无元素引用」是我漏的） | 三个 `.uix` 里给 `.tab-active` / `.cmd-button` / `.cmd-group` 加注释标明「Rust 自绘参照规范，当前不生效」+ 说明 `var(--accent)` 是库 token 且刻意分属两个命名空间；docs/12 §5 新增 **R10** 登记 |
@@ -502,3 +504,40 @@ PASS —— 真实文字元素的对比度全部 ≥ 4.5:1，间距取值全部�
 | **S3** docs/11 §1.3 `input` 行漏了子类型 | **QA 正确** | docs/11 §1.3 已补 `type="radio"/"range"/"number"/"password"`（`widget_factory.cpp:1207-1283`） |
 | **S4** `.root` 的 `font-family` 对 LabelWidget 无效 | **QA 正确** | 已在三个 `.uix` 的 `.root` 上方加注释「设计记录，字体由 `ui_theme_set_default_font` 决定」 |
 | **S5** 根 `<div class="root">` 铺满窗口可结案 | **接受** | 已核实 `ui_window.cpp:1533` `root_->rect = {0,0,size.width,size.height}`；docs/13 §9 该条改为**已结案**（QA 提供的行号，与我的独立查证一致） |
+
+---
+
+## 9. 第三轮（I4 裁决 + 架构裁定 + QA 第二轮）
+
+| 来源 | 事项 | 我的处理 |
+|---|---|---|
+| **交付总监 I4 裁决**（采纳选项 (c)） | 标题字重：`font-weight: 600` 是空声明（core-ui 只认 `bold`/`700`）→ 两个标题不加粗；而 docs/07 §4 写「字重仅 400/500」，**500 同样是空声明** → 两条路都违反文档 | **两行精确改法已落**：<br>· `assets/about.uix` `.heading`：删 `font-weight: 600`，`font-size: 16px` → **14px**<br>· `assets/preview.uix` `.preview-title`：删 `font-weight: 600`，补 `font-size: **14px**`<br>层级改由**字号 + 颜色**承担（14px + `--app-text` vs 12px + `--app-text-secondary` vs 13px + `--app-text`） |
+| **交付总监 accent 定位**（D14） | core-ui 全仓无 `GetSysColor`/`UISettings`/`AccentColor` → **根本不读系统强调色**；docs/07 §4「跟随系统 AccentColor」只能由 Rust 实现 | `assets/themes.json` 的 `revision.decision` 改写为「accent 由 Rust 读系统 `AccentColor` 后 `ui_theme_set_accent_hex()` 写入**库 token** `--accent`；`.uix` 一律读 `var(--accent)`；**`--app-accent` 仅作读不到系统色时的回退源值**」，并新增 `revision.accent_source`（注册表路径 + BGR 序 + 调用顺序）。§4.3 终表的 `--app-accent` 行同步标注「仅回退源值」 |
+| **交付总监 `.tab-active`** | 死规则（不受支持的 `border-bottom` + 命名空间混用 + 无元素引用），要求删掉或改成有元素真正使用 | **已删**（R6）。设计意图不丢：docs/07 §2 的「选中标签底部 2px accent 指示条」由 Rust 自绘，或在 `.uix` 里用 2px 高的 `<div>` |
+| **交付总监 B3** | §6 粘贴的输出复现不出来 | §6 改成**「命令 + 判定 + 退出码」三行式**（`contract-prose.md` §二.4：给指针不给倾倒），详细输出交 CI 存档 |
+| **架构裁定 (b)** | 自绘宿主用 `.uix` 声明 `<custom>`，理由是**布局**（运行时 `ui_custom()` 造的控件没有 CSS 级联结果 → 无 flex/width/height → 尺寸 0 → 列表区空白），而不是"`<div>` 拿不到回调" | **已落**：`assets/main.uix` 的 `<div id="list_host">` → `<custom id="list_host" class="list-host" />`。R5 改写并补两条 Rust 侧注意：① `ui_page_on_widget_mount` 的钩子**挂在具体 page 上** → 切主题重建出新 page 后必须**在新 page 上重新注册**；② 其余三个 Rust 自绘宿主（`nav_host`/`breadcrumb`/`preview_host`）按同一推理应改 `<custom>`，但架构只裁定了列表宿主 → **我未擅自改，已上报待裁决** |
+| **架构改口 ①** | `sfc_parser.cpp` 的路径是 `src/ui/uix/`，**不是** `src/ui/page/` | 我原文档写的就是 `src/ui/uix/sfc_parser.cpp`（无误），但 §2.1 现在补全了完整链条：`sfc_parser.cpp:285-297` 非自闭合 → `pushErr` → **`:373` `if (!doc.errors.empty()) doc.ok = false;`** → `page_api.cpp:249-255` 返回 "SFC parse failed" |
+| **架构改口 ②** | `FirstPlainText` 的精确机制 | 已补进 §1：`FirstPlainText` 取元素的**第一个直接子节点** —— Text → 取内容；Interpolation（`{{ }}`）→ 返回 `""`（由 binding 处理）；Element → 返回 `""`。`text=` 只在 **`<menu>`** 上被读（`title` 别名，`compiler.cpp:641/644`） |
+| **架构改口 ③** | `window { }` 的机制不是"落到根节点"，而是"**选择器匹配 0 个节点**"；另 `:root` 是伪类、普通样式计算里被**显式跳过**（`cascade.cpp:125`） | §2.3 已改口：`window` 选择器命中 0 个节点 → 必须显式给根 `<div>` 加 `class="root"` 再用 `.root { … }`（写法一样，但避免误以为 `window` 选择器有效）；并补「`:root` 块里**只能放 CSS 变量**，放 background/color/font 会被丢掉」 |
+| **QA 第二轮** | B2 / I5 / M06 复核通过；剩 3 处（I4 落地、I3 补 C6、B3） | I4 与 B3 已落；I3 在 `docs/13` §6 补了 **C6**（切深色重建后 27 个句柄是否重取） |
+| **QA 第二轮（数字纠正）** | `docs/12` §2.4 的库默认文字色 `#424242` 有误 | **已改**：实为 `theme::kBtnText()` = **`#242424`**（light，grey::g14；`controls.cpp:61-68`），`#424242` 是 `theme::Current().contentText`（dark 是 `#D6D6D6`），LabelWidget 实际走 `kBtnText()` |
+| **QA 第二轮（口径）** | 「元素总数」有三套值（docs/11 的 34/12/19、`uix_tag_check.py` 的 33/12/19、QA 的 30/9/16） | §0 已统一并写明口径：**一律指模板体元素数 30/9/16，不含 4 个 SFC 外壳标签**；三个数各自的口径也一并注明 |
+| **QA 第三轮 X-2** | 我引的上游 demo 证据不实：写「`<separator>` 在 demo 里一次都没出现」，实际 demo 有 **3 处真实 `<separator/>`**（`demo/ui_demo.uix:663, 672, 687`）；且 `<div class="sep"/>` 是 **19 处**不是 10 处 | **已更正**（§2.6）：改成「demo 主力是 19 处 `<div class="sep"/>`（规则在 `demo/ui_demo.uix:203`），另有 3 处 `<separator/>` —— 那 3 处只能是库色，**印证而非反证**本条结论」。**不影响 B2 的结论**（那 3 处仍然拿不到项目 token） |
+| **QA 第三轮 X-3** | `docs/11` 的 `ui_debug_*` 口径第二个数字不对（我写「全文 73 处含 2 处注释」） | **已更正**为可复现的三口径：**71 个导出声明**（`grep -c "UI_API.*ui_debug_"` = 71）/ 全文 **83 行**提到该前缀（`grep -c "ui_debug_"` = 83）/ 按唯一符号名会得 **73** 个 —— 其中 **2 个是注释里的前缀占位**（`ui_debug_*` 与 `ui_debug_post_*` 的 `*` 被正则截断），**真符号仍是 71**。<br>（QA 给的「72 个 / 1 个仅见于注释」两种口径我都复现不出来，故按上面这组可复现数字落笔） |
+| **QA 第三轮 X-4** | `themes.json` 的 `inject_failure_modes` 第 2 条复制了错数字（`#424242` 文字 / `#D1D1D1` 分隔线） | **已更正**：`#424242` → **`#242424`**（库 `theme::kBtnText()`）；分隔线那半句改成「**分隔线直接消失**」—— 分隔线已是 `<div class="divider">`，`--app-divider` 未定义时 `background` 解析失败 → **画不出来**，**不会再出现库色 `#D1D1D1`**。`docs/13` M04 的同一处也同步 |
+| **架构第三轮 ①** | `--app-accent` 的定位变了：**是 Rust 的回退源值（数据字段），不是 CSS 变量** → Rust 拼 `:root` 时**必须排除** | `themes.json` 的 `revision.decision` 与 `revision.inject` 口径 ③ 已写明；`docs/12` §4.2 加「四条硬口径」表、§4.3 accent 行补「数据字段，不进 `:root`」 |
+| **架构第三轮 ③** | 注入形态：我的「形态乙（紧跟 `<style>` 开头）」vs Rust 的「形态甲（末尾追加完整 `<style>` 块）」 | **已统一为形态甲**（两者都合法）。⚠️ **第五轮更正**：我原写的「乙要求该 `<style>` 是最后一个 `<style>` 块」**依据是反的** —— 真正的约束是「**此前不能有 `:root`**」（自定义属性先定义者赢：`value.cpp:573-581` + `cascade.h:41` + `cascade.cpp:124-125`）。已改，见 §4.2 口径 ⑤ |
+| **交付总监第四轮裁定（宿主标签）** | 四个宿主逐个定「最终由谁画」：`list_host` Rust 自绘 → `<custom>`；`nav_host` Rust 自绘（D07）→ **`<custom>`**；`preview_host` core-ui 控件填充（D06）→ `<div>`；`breadcrumb` core-ui 控件填充 → `<div>` | **已落**：`assets/main.uix` 的 `<div id="nav_host">` → `<custom id="nav_host" class="nav-host" />`（`list_host` 上轮已改）。并在三个 `.uix` 头部与本节 R5 写下**通用规则**：「凡是由 Rust 自绘内容的宿主容器 → `<custom>`；由 core-ui 内置控件填充的宿主 → `<div>`」+ 四个宿主各自的判定来源（D06 / D07 / D12），以后新增宿主照此判定 |
+| **交付总监第四轮裁定（id）** | `list_host` 这个 id **保持不变**（架构师举例写的 `file_list`/`list_list` 是占位名，不是对资产的要求；只要 `.uix` 的 id 与 Rust 侧查的 id 一致即可） | **不改**。`.uix` / `docs/12` §3.1 / §5 R5 三处口径一致 |
+| **QA 第四轮 · docs/12 旧表述** | 同文件内三处口径打架：`:21` 复核栏写「I4 已落」，而 `:360`（R8）与 `:461`（§8 I4 行）还停在「等设计师」 | **已统一**：R8 行改为「**✅ 已裁决并已落地（交付总监 I4，采纳选项 (c)）**」并写明改了哪两个 class；§8 的 I4 行改为「已全部落地 + F3/F6/§9-8 三处口径一致 + 两条 WARN 随之消失」 |
+| **QA 第四轮 · Δ3** | §4.4 的「切 mode 会用当前 accent override 重新派生」不准确 —— 重新派生只对**变体**成立，**基色不变** | **已改**：「切 mode 会用**同一个 accent 基色**重新派生 hover/press/text 变体，**基色本身不变**（`theme.h:435-439` 的 `SetMode` → `ApplyAccent(AccentOverrideValue())`，用的是同一个 override 值）⇒ 顺序反了会拿到**上一次的基色**」 |
+| **QA 第四轮 · Δ4** | `themes.json` 的 `revision.switch` 缺「切主题时**重读系统 AccentColor 并重调 `ui_theme_set_accent_hex()`**」 | **已补**（同段还补了「自动回填只覆盖一半」的精确区分） |
+| **QA 第四轮 · 硬约束** | `.uix` 里**不允许出现深浅色分支**（`.dark { }` / `[data-theme="dark"] { }`）：`selector.cpp:60-64` 的伪类只认 hover/pressed/focus/disabled/checked/root/drag-over，**没有主题态位** → 这类选择器**永远不命中**（静默失效） | **已记为 §2.7**（新增小节）。本轮三个资产**没有任何主题分支选择器** ✓ 符合 |
+| **架构第四轮 · 两条 P0 核对** | `:root` 必须在 `<style>` 内 / `:root` 是唯一采集点 / 「不注入是静默的」/ 27 个句柄失效 / `ui_page_reload` 帮不上忙 / `<separator>` 不画 background —— 六条逐条独立核对，**全部成立** | 无需改动；已在本轮各处引用其结论 |
+| **架构第四轮 · demo 更正** | demo 的 3 处 `<separator/>` **全在 `<menu>` 内部**（菜单项之间的分隔线，用库色正好）；布局里的分隔线 demo 一律用 `<div class="sep"/>` | §2.6 已补这句澄清；并注明**本项目 7 处用的是项目 token `--app-divider`**，不是 demo 的库 token `var(--border-subtle)` |
+| **QA 第六轮 · 形态乙的依据我写反了** | 我写「形态乙要求该 `<style>` 是**最后一个** `<style>` 块」→ **依据是反的**。正确依据是「**此前不能有 `:root`**」：自定义属性**先定义者赢** —— `LookupVar`（`value.cpp:573-581`）**返回第一个命中**；`cascade.h:41` 注释逐字「**(Returns first set encountered.)**」；而 `:root` 规则在 `cascade.cpp:124-125` 被**整条跳过**（根本不进 CSS 级联）⇒ 多个 `:root` 谁先出现谁赢，**后者不会覆盖前者**。<br>**策略不动**（形态甲仍是对的，Rust 不用解析已有 `<style>` 块） | **只改措辞**：§4.2 的形态甲/乙说明 + 四口径表 → **五条硬口径**（新增口径 ⑤「注入的 `:root` 必须是源码中第一个 `:root`」）；`themes.json` 的 `revision.inject` 同步加口径 ⑤；§9 第三轮记录里那句旧依据也标了更正 |
+| **QA 第六轮 · Rust 自检第 3 条断言** | 建议 Rust 侧加载前自检加「注入的 `:root` 必须是源码中第一个 `:root`」，并入 V1.12 | **已登记为 §5 R11**；`themes.json` 的 `revision.inject` 口径 ⑤ 与 `docs/12` §4.2 口径 ⑤ 都写明了「并入 V1.12」。**当前前提成立**：实测三个 `.uix` 剥注释后生效 `:root` 规则数 = **0/0/0**（`main.uix` 那 3 处命中全在 HTML 注释里）→ 现在不会出问题，这是提前钉住将来会静默咬人的缺口 |
+| **架构第七轮 · 宿主形态的三处裁定** | ① `nav_host` → `<custom>`（**第四轮已改**，本轮复核）；② `breadcrumb` → **`<label>`**（原来是**空 `<div>`** → **显示不出任何东西**，是真缺口 → Rust 用 `ui_label_set_text(w, L"…")` 投影文本）；③ `preview_host` → 保持 `<div>` 当**容器**，里面加 `<custom id="preview_image" class="preview-image"/>` + 若干**预先声明**的 `<label>` 元信息行 | **已落**：<br>· `assets/main.uix:185` `<div id="breadcrumb">` → `<label id="breadcrumb" class="breadcrumb" />`<br>· `assets/main.uix:196-201` `preview_host` 拆成「容器 + `<custom id="preview_image">` + 4 行 `<label class="preview-meta">`（`preview_host_name` / `_size` / `_channel` / `_state`）」，新增 CSS `.preview-image { height: 128px }`（对齐 docs/07 §3「图片 ≤128px」上限，fit 由 Rust 算）与 `.preview-meta { display:block; padding:4px 8px; color:var(--app-text-secondary); white-space:nowrap }`<br>· **元信息行 id 用 `preview_host_*` 前缀**（架构只给了 `preview_image`）：避免与 `assets/preview.uix` 的 `preview_channel` / `preview_size` / `preview_state` **同 id** —— 若将来 `preview.uix` 的根被 `ui_widget_add_child` 嵌进 `preview_host`，同树内重 id 会让 `FindById` 命中错的那个 |
+| **架构第七轮 · preview.uix 的 `preview_body`** | 架构点名的是 main.uix 的三个宿主，未点名 `assets/preview.uix` 的 `preview_body`（图片位）。但按**同一条规则**（「这块矩形的内容是不是 Rust 用绘制指令画出来的」→ 是 → `<custom>`）+ D06-1（图片统一由 Rust 在 `<custom>` 里 blit）⇒ 它也应是 `<custom>` | **已改**（`assets/preview.uix:94` `<div>` → `<custom>`）。**这是我按规则推出的，架构未点名** —— 若裁决不同，改回 `<div>` 只是一行 |
+| **架构第七轮 · 元素数与句柄数变了** | 这次是**主动新增元素**（不是标签替换）：`preview_host` 拆开 ⇒ main 模板体 30 → **35**，main 的 id 21 → **26**，全项目句柄 **27 → 32** | 已全量同步：`docs/12` §0 / §3.1 表（现:行 列已按资产实际行号**脚本重建**并逐行复核）/ §4.4 / §5 R4 / §6 断言清单；`docs/13` §0 / H1 / H6 / C6；`assets/themes.json` 的 `revision.switch`；`scripts/gates/uix_tag_check.py` 的期望值（35 / 9 / 16 与 id 清单） |
+| **架构第四轮 · 做不到的一条** | 「加载后断言颜色是否等于 `themes.json`」在 API 层做不到 —— core-ui **没有读回 CSS 变量的 C API**（导出面只有 `ui_widget_set_bg_color` / `set_text_color` 这类写接口，无 `get_style`/`get_var`/`computed`） | **接受，不造 hack**：写进 §5 R5 —— 该静默项只能靠**离屏渲染取一个已知像素**与 `themes.json` 比对（一次性冒烟，不进启动路径） |

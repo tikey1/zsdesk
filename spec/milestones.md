@@ -53,9 +53,10 @@
 | V0.10 | 静态门禁 G01/G03/G04/G08 + 工程门禁 E 段 P0 全绿 | `scripts/gates/verify.py --phase 3` |
 | **V0.11** | ★ **Actions 跑出第一次 full x64 绿灯** —— `Windows build` 工作流在 `push` 上首次全绿，且产出的 `ZSDesk-<version>-full-x64.zip` 可下载 | GitHub Actions 页面 + artifact |
 | **V0.12** | ★ **解包即用的冒烟**：把 ZIP 解到空目录 → 运行 `ZSDesk.exe` → **出现带标题栏的窗口**（不是白屏、不是报错退出） | 人工（CI runner 无交互桌面 → 需真机；CI 侧只能验到「进程能启动并加载 core-ui.dll」） |
-| V0.13 | 打包产物内含 `assets/` 四个关键文件 + `core-ui.dll.revision` 戳记，且戳记内容 == `packaging/core-ui-revision.txt` | `spec/ci-contract.md` §2.4 / §3.1 |
-| V0.14 | **`.uix` 三条硬约束落地**：① `<window .../>` 自闭合；② 文字写在元素内（无 `text=` 属性）；③ 根 `<div class="root">` + `.root {…}`（无 `window {…}` 选择器） | `spec/ffi-core-ui.md` §4.3.3 |
+| V0.13 | 打包产物内含 `assets/` 四个关键文件 + `core-ui.dll.revision` 戳记，且戳记内容 == `packaging/core-ui-revision.txt`（★ **D16**：M0 过渡由 CI 代写但**必须机器断言**；M1 改为 Rust `build.rs` 产出、CI 只校验） | `spec/ci-contract.md` §2.4 / §3.1 / §4.2 |
+| V0.14 | **`.uix` 五条硬约束落地**：① `<window .../>` 自闭合；② 文字写在元素内（无 `text=` 属性）；③ 根 `<div class="root">` + `.root {…}`（无 `window {…}` 选择器）；④ 布局分隔线用 1px `<div class="sep"/>`（`<separator>` 不画 CSS `background`，只给库色）；⑤ **不用 `border-bottom`**（不支持）→ 选中态指示条 Rust 自绘 | `spec/ffi-core-ui.md` §4.3.3 |
 | V0.15 | **加载失败能区分两类**：整页解析失败（`ui_page_load_string` 返回 NULL + `ui_page_last_error`）vs 局部控件缺失（加载成功但 `find_by_id` 返回 0） | 同上 |
+| **V0.16** | ★ **门禁在 CI 里真的被执行**（不只是本地手工跑）：`build.yml` 至少调用 **S13 / id 清单 / 资产质量** 三个脚本，**退出码非 0 ⇒ job 失败**（禁止 `|| true` / `continue-on-error`） | `spec/ci-contract.md` §4.8；CI 日志里能看到每个门禁的独立 step |
 
 ### 1.3 可演示的动作
 
@@ -99,13 +100,14 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 |---|---|---|
 | M1-1 | `.uix` 静态布局落地（修正后的 `main.uix` 标签）+ **Rust 侧 `ui_widget_find_by_id` 取句柄** | `assets/main.uix`、`crates/zsdesk-ui/src/shell_page.rs` |
 | M1-2 | **Rust 自绘文件列表**：虚拟滚动 + 命中测试 + 单击/多选/框选/反向选择 + 图标 + 详细信息列 + 排序 | `crates/zsdesk-ui/src/filelist/` |
-| M1-3 | **Rust 自绘导航树**（已知文件夹 + 快速访问 + 展开收起） | `crates/zsdesk-ui/src/navtree/` |
-| M1-4 | 标签条 / 地址栏 / 状态栏（Rust 侧状态 → `.uix` 小载荷投影） | `crates/zsdesk-app/src/view_model.rs` |
+| M1-3 | **Rust 自绘导航树**（已知文件夹 + 快速访问 + 展开收起）；宿主是 **`<custom id="nav_host">`**（裁定，见 `spec/ffi-core-ui.md` §4.3.4） | `crates/zsdesk-ui/src/navtree/` |
+| M1-4 | 标签条 / 地址栏 / 状态栏（Rust 侧状态 → `.uix` 小载荷投影）；**面包屑必须是能放文字的 `<label id="breadcrumb">`**（Rust `ui_label_set_text`）—— 现在的**空 `<div>` 显示不出任何东西** | 状态：`crates/zsdesk-app/src/app.rs`｜写控件：`crates/zsdesk-ui/src/shell_page.rs` |
 | M1-5 | `IShellItemArray` 枚举 + `IShellItemImageFactory` 取图标（BGRA 预乘）+ LRU 缓存 | `crates/zsdesk-windows/src/shell/{shell_item,icons}.rs` |
 | M1-6 | `IShellPropertyStore` 详细信息列 | `crates/zsdesk-windows/src/shell/properties.rs` |
 | M1-7 | 视图记忆 / 列宽 / 排序记忆 | `crates/zsdesk-app/src/storage.rs`（沿用上游 `window/view_memory.rs`） |
 | M1-8 | 核心 UI 迁移的第一批 `zsdesk-app` 重写（`window/mod.rs` / `paint.rs` / `input.rs` / `mouse_gestures.rs` / `wheel_input.rs`） | `crates/zsdesk-app/src/window/` |
-| M1-9 | **品牌色来源模块**（D14）：读注册表系统 `AccentColor`（BGR 序）→ 回退 `themes.json` 的 `--app-accent`；拼 `:root`（排除 `--app-accent`）+ 加载前自检 | `crates/zsdesk-windows/src/system/accent.rs`（**新增**）+ `crates/zsdesk-app/src/theme.rs` |
+| M1-9 | **品牌色来源模块**（D14）：读注册表系统 `AccentColor`（BGR 序）→ 回退 `themes.json` 的 `--app-accent`；拼 `:root`（排除 `--app-accent`）+ 加载前自检 | 读：`crates/zsdesk-windows/src/theme.rs`（**改造**）｜拼装：`crates/zsdesk-ui/src/theme.rs`（**改造**） |
+| M1-10 | **页面上下文（句柄表）+ 重建协议**：持有 **32** 个 `ui_widget_find_by_id` 句柄（`main.uix` 26 + `preview.uix` 6）；切主题/换 accent 时 `destroy → load → 重取全部句柄 + 重注册挂载钩子 → 重挂回调` | `crates/zsdesk-ui/src/shell_page.rs`（**改造**） |
 
 > **首版只读**（D-15）：命令条不含新建 / 重命名 / 删除 / 剪贴板命令。
 
@@ -125,7 +127,11 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | V1.10a | **页面用 `ui_page_load_string` 加载**（Rust 注入 `:root`）→ 证明 `.uix` 与 `themes.json` 在运行时被读到 | 打包缺资源时会立刻暴露 |
 | V1.10b | **`ui_theme_set_accent_hex` 被调用** → 自绘区蓝与按钮蓝一致（不撞成两种蓝） | 截图对比 |
 | **V1.11** | **启动日志打印生效的 accent 值与来源**：`accent=#RRGGBB source=system\|fallback(themes.json:light)\|default(library)`；与「设置 → 个性化 → 颜色」的强调色 hex **逐位对照一致** | 读启动日志 + 真机核对 |
-| **V1.12** | **`:root` 注入自检存在且 fail-fast**：故意把 `:root` 裸放在源码顶层 → **Rust 侧直接报错**（提示「`:root` 必须在 `<style>` 块内」），**不得**等到 core-ui 报 "SFC parse failed" | 单元测试（构造坏源码） |
+| **V1.12** | ★ **`:root` 注入自检存在且 fail-fast（四条断言）**：① 故意把 `:root` 裸放源码顶层 → **Rust 侧直接报错**（提示「`:root` 必须在 `<style>` 块内」），**不得**等到 core-ui 报 "SFC parse failed"；② 构造「`.uix` 自带 `:root` 在前」→ Rust 侧**顺序断言**报错（core-ui 是**先定义者赢**，不拦就会**静默失效**：切主题颜色不变）；③ 构造「`:root` 内混入普通声明」→ **内容断言**报错；④ 构造「键集含 `--app-accent`」→ **键集断言**报错 | 单元测试（4 个坏源码构造） |
+| **V1.13** | ★ **切主题后页面重建闭环**：切一次主题 → **状态栏 / 列表 / 预览 / 面包屑四处都正常刷新**（旧句柄没重取的表现是「状态栏不更新 / 列表空白 / 预览不刷新」）；旧 page 已 `ui_page_destroy`；**32 个句柄全部重取** | 人工四处 + 代码审查（`spec/ffi-core-ui.md` §4.6） |
+| **V1.14** | ★ **分隔线颜色 = `--app-divider`**（用 1px `<div class="sep"/>`；`<separator>` 画的是**库色** `theme::kDivider()`，不跟项目 token） | 截图对比 |
+| **V1.15** | ★ **「压根没注入」这个静默项被抓住**：离屏渲染后取一个**已知背景像素**，与 `themes.json` 的 `--app-bg` 一致（core-ui **没有**读回 CSS 变量的 C API → 只能靠像素；**一次性冒烟，不进启动路径**） | 离屏渲染单测（`ui_offscreen_begin/end`） |
+| **V1.16** | ★ **面包屑可见**：进入目录后地址栏显示当前路径（`<label id="breadcrumb">` + Rust `ui_label_set_text`）—— **空 `<div>` 一定显示不出东西**，这条就是防那个 | 截图 |
 | V1.10 | 全部门禁（含新增的 S8/S9/S10）全绿 | CI |
 
 > **V1.1 的口径补充（D13）**：视觉对照**不包含** Mica / Acrylic 材质与高对比度模式 ——
@@ -185,7 +191,7 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | M2-2 | **可检性检查**：`GuoheView` 未安装 / 未注册文件关联 / exe 存在但启动失败 → 三种可区分的结论 | `crates/zsdesk-ui/src/external.rs` |
 | M2-3 | **降级通道**：未安装 → 提示 + 提供「用系统默认程序打开」/「在资源管理器中显示」两个替代动作；不静默失败 | 同上 + `crates/zsdesk-app/src/window/` |
 | M2-4 | **错误提示文案**（人话 + 下一步动作，不用「错误 0x80070002」） | `crates/zsdesk-ui/src/external.rs` + `.lang` |
-| M2-5 | **预览窗格降级内容**：图标 + 元信息（名称/大小/类型/时间）+ 纯文本预览（`.txt/.md/.log/.json/.rs` 等）+ 「用 GuoheView 打开」按钮 | `crates/zsdesk-ui/src/preview/` |
+| M2-5 | **预览窗格降级内容**：图标 + 元信息（名称/大小/类型/时间）+ 纯文本预览（`.txt/.md/.log/.json/.rs` 等）+ 「用 GuoheView 打开」按钮；**结构 = `<div id="preview_host">` 容器 + `<custom id="preview_image">`（Rust 画图）+ 预先声明的 `<label>` 元信息行**（裁定见 `spec/ffi-core-ui.md` §4.3.4） | `crates/zsdesk-ui/src/preview/` |
 | M2-6 | 外部调用的**超时与失败归一化**（不阻塞 UI 线程） | `crates/zsdesk-windows/src/` |
 | M2-7 | 安全基线落地：调用参数**数组化**（不拼命令行）、路径规范化、失败日志脱敏 | `crates/zsdesk-ui/src/external.rs` |
 
@@ -316,6 +322,11 @@ pwsh scripts/check-coreui-dll.ps1 -DllPath core-ui/clang-cl-build/core-ui.dll `
 #   未装 GuoheView → 必须给出降级提示，不得静默失败
 #   （用一台干净 VM 或临时改 PATH / 注册表关联）
 
+# M1 追加（页面重建闭环，spec/ffi-core-ui.md §4.6）
+#   切一次主题 → ui_page_destroy → ui_page_load_string → 重取全部 32 个句柄 → 重挂回调
+#   断言：状态栏 / 列表 / 预览 / 面包屑**四处都刷新**（V1.13）
+#   离屏渲染取「根容器背景」像素 == themes.json 的 --app-bg（V1.15，验「压根没注入」）
+
 # M3 追加
 pwsh scripts/package-portable.ps1 -StageDir stage -OutFile ZSDesk-<ver>-full-x64.zip
 #   → 校验 manifest 的每个 SHA-256
@@ -337,7 +348,8 @@ pwsh scripts/package-portable.ps1 -StageDir stage -OutFile ZSDesk-<ver>-full-x64
 | `uia` / `accessibility` / `narrator`（`src/ui/widget.cpp`、`src/ui/ui_api.cpp`） | **零命中** → **无 UIA 桥接** |
 | `HighContrast` / `AppsUseLightTheme`（`src/ui/theme.h`） | **零命中** → **不感知系统高对比度** |
 | `DwmSetWindowAttribute`（`src/ui/ui_window.cpp`） | 只用于 `TRANSITIONS_FORCEDISABLED` 与圆角偏好 → **无 Mica / Acrylic 入口** |
-| `mica` / `acrylic` / `backdrop` | **零命中** |
+| `mica` / `acrylic`（窗口级） | **零命中** → **无 Mica / Acrylic 入口** |
+| `backdrop` | ⚠️ **不是零命中**（架构侧复核：`src/` 全仓 38 处命中） —— 分两类：① **CSS `backdrop-filter` / `backdrop-blur` 在任意 widget 上受支持**（`widget_factory.cpp:606-610` → `w.backdropBlur = parseBlur(...)`；`widget.h:245` `float backdropBlur = 0.0f;`）→ 将来做浮层模糊**用得上**；② 上下文菜单的背景模糊捕获（`context_menu.cpp` 的 `backdropBlurRadius_` / `backdropResourceKey_`）。**与窗口级材质无关** —— 窗口级 `DWMWA_SYSTEMBACKDROP` / `DWMWA_MICA` / `SetWindowCompositionAttribute` / `ACCENT_POLICY` **全仓零命中** ✓ |
 
 ### 8.2 限制项（逐条写进交付文档）
 
@@ -345,7 +357,7 @@ pwsh scripts/package-portable.ps1 -StageDir stage -OutFile ZSDesk-<ver>-full-x64
 |---|---|---|---|
 | **L1** | **高对比度模式不支持** | 系统开启高对比度时，本程序**不会**自动改用系统色；自绘控件与自绘区域维持本程序自己的配色 | ❌ 不可实现（core-ui 无 UIA / 无系统色感知） |
 | **L2** | **读屏 / Narrator 不支持** | 屏幕阅读器**读不出**本程序的控件内容与状态 | ❌ 不可实现（同上） |
-| **L3** | **无 Mica / Acrylic 窗口材质** | 标题栏区域为**纯色**，不做半透明/模糊；Win10 与 Win11 表现一致 | ❌ 丢失（上游 zsdesk 自己用 DWM 实现 Mica，见 `crates/zsdesk-app/src/theme.rs:131-194`；换 core-ui 后不复存在） |
+| **L3** | **无 Mica / Acrylic 窗口材质** | 标题栏区域为**纯色**，不做半透明/模糊；Win10 与 Win11 表现一致 | ❌ 丢失（上游 zsdesk 自己用 DWM 实现 Mica，见 `crates/zsdesk-windows/src/theme.rs:131-194`；换 core-ui 后不复存在） |
 | **L4** | 深色标题栏 / 系统圆角偏好 | core-ui 只暴露圆角偏好，不暴露系统材质 | ⚠️ 降级 |
 | **L5** | **系统强调色要靠 Rust 侧实现** | 「跟随系统 `AccentColor`」由 Rust 读注册表实现（§5.6.2 的 D14 契约）；读不到时回退 `themes.json` 的 `--app-accent` | ✅ 已设计（M1 落地） |
 

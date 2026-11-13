@@ -60,7 +60,7 @@ ASSETS = ("assets/main.uix", "assets/preview.uix", "assets/about.uix")
 # 修正前后必须一致的**模板体**元素数（docs/12 §0；不含 <window>/<style>/<template>
 # 三个 SFC 外壳 —— 那是文件外壳，不是界面元素）
 EXPECTED_ELEMENT_COUNT = {
-    "assets/main.uix": 30,
+    "assets/main.uix": 35,
     "assets/preview.uix": 9,
     "assets/about.uix": 16,
 }
@@ -70,6 +70,8 @@ EXPECTED_IDS = {
         "titlebar_host", "global_search", "tab_host", "tab_placeholder",
         "command_host", "nav_hint", "address_host", "breadcrumb", "address",
         "search", "infobar_host", "nav_host", "list_host", "preview_host",
+        "preview_image", "preview_host_name", "preview_host_size",
+        "preview_host_channel", "preview_host_state",
         "status_host", "status_item_count", "status_selected", "status_text",
         "status_progress", "status_thumb_cache", "status_image_channel",
     },

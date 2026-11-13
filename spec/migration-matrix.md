@@ -339,7 +339,7 @@
 | `.uix` 页面 | `ui/*.uix` | 800–1,500 行 | M1–M2 |
 | 预览窗格 | `crates/zsdesk-ui/src/preview/` | 500–900 行 | M2 |
 | Shell 缩略图 / 属性 | `crates/zsdesk-windows/src/shell/{thumb,properties}.rs` | 300–500 行 | M1 |
-| 核心 UI 胶水（状态投影） | `crates/zsdesk-ui/src/shell_page.rs` + `crates/zsdesk-app/src/view_model.rs` | 500–900 行 | M1 |
+| 核心 UI 胶水（状态投影） | `crates/zsdesk-ui/src/shell_page.rs` + `crates/zsdesk-app/src/app.rs` | 500–900 行 | M1 |
 
 **合计新增**：约 5,900–10,600 行 [估算]。
 

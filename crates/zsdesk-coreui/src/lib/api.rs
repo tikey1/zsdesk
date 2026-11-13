@@ -245,6 +245,12 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 extern "C" {
+    /// 按 id 取控件句柄。★ **句柄的生命周期绑在 page 上**：
+    /// 页面重建（`ui_page_load_string` 返回新 page）后，
+    /// **之前拿到的所有句柄全部失效** —— 继续用 = 写野内存 = 静默崩溃 / 花屏，
+    /// core-ui **不会**报「句柄无效」。
+    /// → 切主题 / 换 accent 后必须**重取全部 32 个**（`spec/ffi-core-ui.md` §4.6）。
+    /// 返回 0 = 没找到（Rust 侧必须能区分「找不到」与「整页加载失败」）。
     pub fn ui_widget_find_by_id(root: UiWidget, id: *const u8) -> UiWidget;
     pub fn ui_widget_set_id(w: UiWidget, id: *const u8);
     pub fn ui_widget_add_child(parent: UiWidget, child: UiWidget);
@@ -335,8 +341,17 @@ extern "C" {
     /// 源码是 **UTF-8**。★ 本项目实际用这个 —— Rust 要在加载前把 `:root { … }`
     /// 拼进 `.uix` 源码（库没有运行时替换 CSS 变量的 C API），
     /// 且深浅色切换必须用**新的**源码重新加载（`ui_page_reload` 会重放旧源码）。
+    ///
+    /// ★ 返回的是**全新**的 page：旧 page 的控件被销毁 → 之前
+    /// `ui_widget_find_by_id` 拿到的句柄**全部失效**（本项目 32 个：main 26 + preview 6）。
+    /// 重建三步见 `spec/ffi-core-ui.md` §4.6：
+    /// `ui_page_destroy(旧)` → `ui_page_load_string(新)` → **重取全部句柄**。
     pub fn ui_page_load_string(html_source: *const u8) -> UiPage;
+    /// 销毁 page。**切主题 / 换 accent 重建页面时必须先调它**（否则泄漏）。
     pub fn ui_page_destroy(p: UiPage);
+    /// 重放**旧源码**重新编译：`sourcePath` 为空时用 `sourceText`（即上次 load 的那份）
+    /// → **改不了 palette**（切主题用不上），且**同样会重新编译 → 同样让句柄失效**。
+    /// → 本项目**不使用**它；只在「同源码重编译」的场景（如热重载调试）才考虑。
     pub fn ui_page_reload(p: UiPage) -> i32;
     pub fn ui_page_root(p: UiPage) -> UiWidget;
     pub fn ui_page_open_window(p: UiPage, override_defaults: *const UiWindowConfig) -> UiWindow;

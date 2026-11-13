@@ -42,6 +42,7 @@
 
 pub mod api;
 pub mod loader;
+pub mod theme;
 pub mod ui_thread;
 pub mod version;
 
@@ -49,6 +50,7 @@ pub use api::{
     UiBitmap, UiColor, UiDrawCtx, UiMenu, UiMenuItem, UiPage, UiRect, UiThemeMode, UiWidget, UiWindow,
 };
 pub use loader::{Api, CoreUi, LoadError, MissingSymbol, OptionalApi};
+pub use theme::{InjectError, RootVars, APP_VAR_PREFIX};
 pub use ui_thread::{SharedUi, UiHandle, UiThread};
 pub use version::{Capabilities, CoreUiVersion, RevisionStamp};
 

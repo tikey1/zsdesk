@@ -189,8 +189,10 @@ Rust 必须在加载前把 `:root { --app-*: … }` **拼进 `.uix` 源码**：
 读 assets/main.uix（UTF-8）
   → 读 assets/themes.json（当前模式的 token）
   → 拼 ":root { --app-bg: …; … }"        ← 键集 = 全部 --app-*，减去 --app-accent（D14）
-  → 追加为源码末尾的一个完整 <style> 块  ← 不裸放顶层（否则整页 load 失败）
-  → Rust 侧自检：每个 :root 是否落在某个 <style> 区间内 → 不满足即 fail-fast
+  → 插入为源码【最前面】的一个完整 <style> 块
+       ← 不裸放顶层（否则整页 load 失败）
+       ← 必须是【第一个】:root（core-ui 是「先定义者赢」，见 ffi-core-ui.md §4.3.2.1 规则 4）
+  → Rust 侧自检（四条断言）：位置 / 顺序 / 内容（只含 --app-*）/ 键集 → 不满足即 fail-fast
   → ui_page_load_string(utf8_source)      ← 注意是 const char*（UTF-8），不是 const wchar_t*
 ```
 
@@ -203,46 +205,56 @@ Rust 必须在加载前把 `:root { --app-*: … }` **拼进 `.uix` 源码**：
 | **不用** `watch` / `ref` / `reactive` / 生命周期 hook | `.uix` 不支持（`docs/uix-guide.md` §3.5） |
 | **列表数据整体替换，不原地 mutate** | 原地 mutate 不触发响应式 |
 | **`.uix` 里只有布局/样式/token** | 用户 `assets/main.uix` 头注释的 **D-15「STATIC LAYOUT ONLY」** —— 无事件属性、无业务脚本；列表行由 Rust 侧 `ui_custom_on_draw` 从 Rust EntryStore 绘制；回调在 Rust 注册；首版只读 |
-| **自绘控件用 `<custom>` 静态声明** | ★ **架构师裁定（2026-11-13）**：在 `.uix` 里写 `<custom id="file_list" class="list-host"/>`，Rust 用 `ui_page_on_widget_mount(page, "file_list", cb, ud)` 取句柄后挂绘制回调。**不用**运行时 `ui_custom()` + `ui_widget_add_child()`。理由：运行时造的控件**没有 CSS 级联结果** → 无 `flex-grow`/`width`/`height` → 在 flex 容器里**尺寸为 0** → 列表区空白；静态声明则由工厂明确「CSS width/height 走 ApplyCommonStyle 自然生效」（`widget_factory.cpp:1114-1118`）。详见 `spec/ffi-core-ui.md` §4.3.1 |
+| **自绘控件用 `<custom>` 静态声明** | ★ **架构师裁定（2026-11-13）**：在 `.uix` 里写 `<custom id="list_host" class="list-host"/>`，Rust 用 `ui_widget_find_by_id(root, "list_host")` 取句柄（并在**新 page 上**重新注册 `ui_page_on_widget_mount`）后挂绘制回调。**id 以资产为准 = `list_host`**（`<区域>_host` 命名规则）。**不用**运行时 `ui_custom()` + `ui_widget_add_child()`。理由：运行时造的控件**没有 CSS 级联结果** → 无 `flex-grow`/`width`/`height` → 在 flex 容器里**尺寸为 0** → 列表区空白；静态声明则由工厂明确「CSS width/height 走 ApplyCommonStyle 自然生效」（`widget_factory.cpp:1114-1118`）。详见 `spec/ffi-core-ui.md` §4.3.1 / §4.3.4 |
 | **`<window>` 必须自闭合** | `sfc_parser.cpp:285-297`：非自闭合 → `pushErr` → `sfc_parser.cpp:373` `if (!doc.errors.empty()) doc.ok = false;` → **整页 load 失败**。Rust 侧必须能区分「整页解析失败」（`ui_page_load_string` 返回 NULL，取 `ui_page_last_error`）与「局部控件缺失」（加载成功但 `find_by_id` 返回 0） |
 | **文字必须是元素内的文本节点** | `text="…"` **不是**文本属性（只有 `<menu>` 读它作 title 别名，`compiler.cpp:641/644`）。真实机制是 `FirstPlainText`（`widget_factory.cpp:54-61`）取**第一个直接子文本节点**。→ 写 `<label>文字</label>`，不是 `<label text="文字"/>` |
-| **`:root` 只能注入到 `<style>` 块内** | ★ QA B1 复核 + 架构侧核对（`sfc_parser.cpp:260-267`）：`:root` 若**裸放在源码顶层** → `unexpected content at top level` → `doc.ok=false` → **整页 load 失败**（报错 "SFC parse failed"，极难定位）。顶层只允许 `<window>` `<template>` `<script>` `<style>` `<import>` `<link>`。→ Rust 拼 `:root` 时**追加一个完整的 `<style>` 块到源码末尾**（多个 `<style>` 块允许，`sfc_parser.cpp:321-330`）；且**加载前自检**「`:root` 是否落在某个 `<style>` 块内」，不满足即 fail-fast。完整规则见 `spec/ffi-core-ui.md` §4.3.2.1 |
-| **`:root` 内只放 CSS 变量** | `cascade.cpp:124-126` 明确 `Skip :root — those only define CSS vars` → `:root { background/color/font-family }` 会被**静默丢弃**。→ `:root` 只写 `--app-*`；根节点的普通样式走 `.root` class |
+| **`:root` 只能注入到 `<style>` 块内** | ★ QA B1 复核 + 架构侧核对（`sfc_parser.cpp:260-267`）：`:root` 若**裸放在源码顶层** → `unexpected content at top level` → `doc.ok=false` → **整页 load 失败**（报错 "SFC parse failed"，极难定位）。顶层只允许 `<window>` `<template>` `<script>` `<style>` `<import>` `<link>`。→ Rust 拼 `:root` 时**在源码最前面插入一个完整的 `<style>` 块**（多个 `<style>` 块允许，`sfc_parser.cpp:321-330`；顶层块顺序无关）；且**加载前自检**，不满足即 fail-fast。完整规则见 `spec/ffi-core-ui.md` §4.3.2.1 |
+| **`:root` 内只放 CSS 变量** | `cascade.cpp:125` 明确 `Skip :root — those only define CSS vars` → `:root { background/color/font-family }` 会被**静默丢弃**（零诊断）。→ `:root` 只写 `--app-*`；根节点的普通样式走 `.root` class；**Rust 自检必须断言**它（不只是建议） |
+| **注入必须是源码里「第一个」`:root`** | ★ QA 第五轮 Δ-A 纠正（原契约写「最后」，**方向反了**）：`CollectRootVars`（`cascade.cpp:20-33`）按文档顺序推进有序向量，`LookupVar`（`value.cpp:572-579`）**返回第一个命中**，`cascade.h:41` 注释逐字「**Returns first set encountered**」；且 `:root` 规则在普通级联里被**整条跳过**（`cascade.cpp:125`）→ **根本不参与 CSS 级联** → 自定义属性是**先定义者赢**。⇒ 注入若排在 `.uix` 自己的 `:root` 之后 → `.uix` 的值赢 → Rust 的注入被**静默忽略** → 症状「切主题颜色不变」，**无任何报错**。→ 注入块插在**源码最前面**；Rust 自检断言「注入的是第一个 `:root`」 |
 | **根窗口样式用 `.root` class** | `window { … }` 是标签选择器（`selector.cpp:59` `node.tag == "window"`），而 `<window>` **不产生 widget**（`sfc_parser.cpp:285-296`）→ 匹配 0 个节点 → 整条无效；`:root { … }` 在普通样式计算里被**显式跳过**（`cascade.cpp:125`），**只定义 CSS 变量**。→ 根 `<div class="root">` + `.root { … }` |
 | **`:root` 的键集要排除 `--app-accent`** | ★ D14：`--app-accent` 是 **Rust 读系统色失败时的回退源值**（数据字段），**不是 CSS 变量** → 不得注入 `:root`；`.uix` 里的强调色一律 `var(--accent)`（库 token）。注入它没有消费者，且会诱发「两种蓝」 |
+| **`border-bottom` 不支持** → 选中态指示条由 Rust 自绘 | ★ core-ui 的 CSS 只认 `border` / `border-color` / `border-width` / `border-radius`（`widget_factory.cpp:635-653`），**全仓 grep `border-bottom` = 零命中** → 不区分边框方向。标签选中态的 2px 强调色条**必须**由 Rust 在 `<custom>` 的 draw 回调里画（`.uix` 静态 + 没有运行时切 class 的 API → 表达不了「哪个被选中」） |
+| **布局分隔线用 1px `<div class="sep"/>`** | ★ `<separator>` **不画 CSS `background`**（`controls.cpp:635-643`：`SeparatorWidget::OnDraw` 不调 `Widget::OnDraw`，颜色写死 `theme::kDivider()`）→ 要跟 `--app-divider` 同色**只能用 `<div>` + `background`**。上游 demo 的 19 处布局分隔线正是 `class="sep"`（它的 3 处 `<separator/>` 都在 `<menu>` 内部） |
 
-### 4.3.1 ★ `:root` 注入的**四口径**（对外统一措辞）
+### 4.3.1 ★ `:root` 注入的**六口径**（对外统一措辞）
 
-> 与 `spec/ffi-core-ui.md` §4.3.2.1 **逐字一致**。前端已按这四点改完 `assets/themes.json`；
-> Rust 侧实现与门禁脚本按同一口径。
+> 与 `spec/ffi-core-ui.md` §4.3.2.1 **逐字一致**。
+> ⚠️ **口径 4/5 在 2026-11-13 被 QA 的 Δ-A 纠正**（原写法方向反了，见下）——
+> 前端若已按旧措辞落笔，**注入形态要改成「源码最前面插入」**。
 
 | # | 口径 | 一句话 | 违反的后果 |
 |---|---|---|---|
-| 1 | **拼进 `<style>` 块内** | `:root` 必须包在 `<style>` 里；Rust 统一**在源码末尾追加一个完整的 `<style>` 块** | 裸放源码顶层 → `sfc_parser.cpp:260-267` 报 `unexpected content at top level` → **整页 load 失败**，报错 "SFC parse failed"，极难定位 |
-| 2 | **只允许 CSS 变量** | `:root` 里只写 `--app-*`（减去 `--app-accent`） | `background` / `color` / `font-family` 被 `cascade.cpp:124-126` **静默丢弃** |
+| 1 | **拼进 `<style>` 块内** | `:root` 必须包在 `<style>` 里；Rust 统一**在源码最前面插入一个完整的 `<style>` 块** | 裸放源码顶层 → `sfc_parser.cpp:260-267` 报 `unexpected content at top level` → **整页 load 失败**，报错 "SFC parse failed"，极难定位 |
+| 2 | **只允许 CSS 变量** | `:root` 里只写 `--app-*`（减去 `--app-accent`） | `background` / `color` / `font-family` 被 `cascade.cpp:125` **静默丢弃**（零诊断） |
 | 3 | **根样式走 `.root` class** | 根 `<div class="root">` + `.root { … }` | `window { … }` 匹配 0 个节点 → 整条无效（**不报错**，只是不生效） |
-| 4 | **Rust 侧加载前自检** | 断言每个 `:root` 落在某个 `<style>` 区间内 → 不满足**在 Rust 侧 fail-fast** | 错误被推迟到 core-ui 侧，表现为「SFC parse failed」，看不出是 `:root` 越界 |
+| 4 | **Rust 侧加载前自检（四条断言）** | 位置（`:root` 在 `<style>` 内）/ **顺序**（注入的是**第一个** `:root`）/ 内容（每条声明匹配 `--app-[a-z0-9-]+\s*:`）/ 键集（无 `--app-accent`、不撞库 token）→ 任一不满足**在 Rust 侧 fail-fast** | ① 位置错 → 被推迟到 core-ui 侧报「SFC parse failed」；② **顺序错 → 无任何报错**，只是颜色不对；③ 内容错 → 无任何报错，只是某些颜色没生效 |
+| 5 | **注入必须是「第一个」`:root`** | ★ core-ui 的自定义属性**先定义者赢**（`LookupVar` 返回**第一个**命中；`cascade.h:41` 注释 "Returns first set encountered"）→ **不是**「后者覆盖前者」。**完整表述**：必须是「**整张样式表**里的第一个 `:root`」，而整张样式表 = **`<link>` CSS（在前，`page_api.cpp:271-277`）+ inline `<style>`（在后）** → **`<link>` 的 CSS 里也不能有 `:root`**（本项目零 `<link>`） | 注入排在 `.uix` 自己的 `:root` 之后 → **`.uix` 的值赢** → Rust 的注入被**静默忽略** → 症状「切主题颜色不变」，**无任何报错** |
+| 6 | **键集排除 `--app-accent`** | 它是 D14 的**回退源值**（数据字段），不是 CSS 变量 | 注入它 → 有人写 `var(--app-accent)` 就与系统色脱钩 → **两种蓝** |
 
-**合法形态**：甲（**推荐**，Rust 实现走这个）= 末尾追加完整 `<style>` 块；
-乙 = 插进**已有** `<style>` 块内部（该块须是**最后一个** `<style>`）。
-本项目三个 `.uix` 目前**各只有一个** `<style>` 块 → 乙也合法；但 Rust 统一走甲，不依赖这个巧合。
+**合法形态**：甲（**推荐**，Rust 实现走这个）= **在源码最前面插入**一个完整的 `<style>` 块；
+乙 = 插进**第一个** `<style>` 块内部、其**块首**。
+⚠️ **不要用「末尾追加」**：那会让 `.uix` 自己的 `:root` 抢先（口径 5）。
+本项目三个 `.uix` 目前**各只有一个** `<style>` 块，且**生效的 `:root` 规则数 = 0**（QA 实测）→ 今天两种形态都能跑，但只有甲能扛住「将来有人往 `.uix` 加 `:root`」。
 
 ### 4.4 ★ Rust 侧启动初始化职责落点（D14）
 
 | 步 | 做什么 | 落点（crate / 模块） | 失败处置 |
 |---|---|---|---|
-| 0 | **读系统 `AccentColor`**（注册表 `HKCU\...\Explorer\AccentColor`，**BGR 序**） | `crates/zsdesk-windows/src/system/accent.rs`（**新增**） | 读不到 → 回退 `themes.json` 当前模式的 `--app-accent`；再没有 → 用库默认 |
-| 0' | 决定生效 accent（值 + 来源标记） | `crates/zsdesk-app/src/theme.rs`（**改造上游同名文件**） | — |
+| 0 | **读系统 `AccentColor`**（注册表 `HKCU\...\Explorer\AccentColor`，**BGR 序**） | `crates/zsdesk-windows/src/theme.rs`（**改造**：加 `read_system_accent()`；与该文件已有的 DWM backdrop / 圆角偏好同处） | 读不到 → 回退 `themes.json` 当前模式的 `--app-accent`；再没有 → 用库默认 |
+| 0' | 决定生效 accent（值 + 来源标记） | `crates/zsdesk-ui/src/theme.rs`（**改造上游同名文件**：它已有 `Mode` / `Palette` / `accent` 字段 → 正是主题模型的位置） | — |
 | 1–2 | `ui_theme_set_default_font` / `ui_theme_set_cjk_font` / `ui_theme_set_mode` | `crates/zsdesk-coreui/`（绑定）→ 由 `zsdesk-app` 调用 | 字体缺失 → 库回退默认字体（不崩） |
 | 3 | `ui_theme_set_accent_hex("#RRGGBB")` | 同上 | 值非法 → 不调用（用库默认） |
-| 4 | 拼 `:root` → **末尾追加完整 `<style>` 块** → **自检** → `ui_page_load_string` | `crates/zsdesk-app/src/theme.rs`（拼装） + `crates/zsdesk-coreui/`（调用） | 自检不过 → **fail-fast**，报「`:root` 必须在 `<style>` 块内」 |
+| 4 | 拼 `:root` → **在源码最前面插入完整 `<style>` 块** → **自检（四条断言）** → `ui_page_load_string` | `crates/zsdesk-ui/src/theme.rs`（拼装） + `crates/zsdesk-coreui/`（调用） | 自检不过 → **fail-fast**，报「`:root` 必须在 `<style>` 块内」 |
 
-**依赖方向**：`zsdesk-app → { zsdesk-windows, zsdesk-coreui }`；
-**`zsdesk-coreui ↛ zsdesk-windows`**（FFI crate 不依赖平台 crate，§2.2 的分层不破、不新增环）。
+**依赖方向**：`zsdesk-ui → { zsdesk-windows, zsdesk-coreui }`；`zsdesk-app → { zsdesk-ui, zsdesk-windows, zsdesk-coreui }`；
+**`zsdesk-coreui ↛ zsdesk-windows`**（FFI crate 不依赖平台 crate，§2.2 的分层不破）。
+**新增的两条边都是无环的**：`zsdesk-windows` 只依赖 `zsdesk-core` / `zsdesk-platform` / `windows-sys`，回不到 `zsdesk-ui`。
 
-> **为什么读注册表归 `zsdesk-windows`**：注册表 / Shell / COM 这类 Win32 读写归平台 crate；
-> `zsdesk-coreui` 只负责「把 core-ui 调起来」，不认识注册表、不认识 Win32。
-> 业务拼装（读哪个模式、拼什么 `:root`、调什么顺序）归 `zsdesk-app` —— 它是 composition root。
+> **为什么这么分三层**：注册表 / Shell / COM 这类 Win32 读写归**平台 crate**（`zsdesk-windows`）；
+> `zsdesk-coreui` 只负责「把 core-ui 调起来」，不认识注册表、不认识 Win32；
+> **主题模型 + 页面装配**归 **chrome 层**（`zsdesk-ui`：上游 `theme.rs` / `chrome.rs` / `menus.rs` 就在这一层，
+> 而 `zsdesk-coreui` 的 README 也写明「**页面装配在 `zsdesk-ui`**」）；
+> `zsdesk-app` 只做**状态机与编排**（上游 `app.rs` / `commands.rs`）。
 
 **启动日志（必须打印，M1 验收项 V1.11）**：
 
@@ -254,6 +266,50 @@ accent=#3971EC source=default(library)
 
 > **⚠️ BGR 坑**：注册表值是 **BGR 序**（`0x00BBGGRR`）→ 写成 RGB 会得到**橙色系**。
 > 真机核对：系统设置的强调色 hex 与日志里的 `accent=` 对不上 → 通道顺序反了。
+
+### 4.5 ★ 页面重建时的句柄重取（**32 个**，切主题 / 换 accent 必做）
+
+**谁持有句柄**：**chrome 层 `zsdesk-ui`** 持有 `ui_widget_find_by_id` 的结果 → 放在
+`crates/zsdesk-ui/src/shell_page.rs` 的**页面上下文**里（一个 `HashMap<&'static str, UiWidget>` 或按页分组的结构）。
+（与 `zsdesk-coreui` README 的「页面装配在 `zsdesk-ui`」一致；`zsdesk-app` 只提供状态。）
+
+**重建协议（三步，缺一不可）**：
+
+```
+1. ui_page_destroy(旧 page)                      ← 归属：zsdesk-ui（shell_page.rs）
+2. ui_page_load_string(新源码) → 新 page          ← 归属：zsdesk-ui 调，zsdesk-coreui 绑定
+3. 重取全部 32 个句柄 + 在新 page 上重新注册挂载钩子
+   + 重新挂回调 / 重新投影状态                      ← 归属：zsdesk-ui；状态来自 zsdesk-app
+```
+
+| 页面 | distinct `id` | 数量 |
+|---|---|---:|
+| `assets/main.uix` | 21（含 8 个 `<custom>` 宿主） | **21** |
+| `assets/preview.uix` | 6 | **6** |
+| **合计** | | **32** |
+
+> **实测复核**：`main.uix` 全文 23 处 `id="`，其中 2 处在**注释行**（第 57 行写了两遍 `id="list_host"`）
+> → distinct = **21**；`preview.uix` = **6**。与前端报的一致。
+>
+> **自动回填只覆盖一半**：`ui_page_on_widget_mount` 会在重建后**自动重新触发** →
+> 自绘控件的绘制回调 ✅ 自动回填；但 Rust 侧那 32 个 `ui_widget_find_by_id` 句柄 **不会自动更新** ❌
+> → 旧句柄继续用 = 写野内存 = **静默崩溃 / 花屏**，**不会报「句柄无效」**。
+
+完整协议、依据行号与故障判据（切主题后「状态栏不更新 / 列表空白 / 预览不刷新」→ 第一嫌疑就是旧句柄）
+见 `spec/ffi-core-ui.md` **§4.6**。
+
+### 4.6 ★ 自绘宿主的清单（哪些区域由 Rust 画）
+
+| id | 标签 | 谁填内容 | 落点 |
+|---|---|---|---|
+| `list_host` | `<custom>` | **Rust 自绘**（文件列表：虚拟滚动 / 命中测试 / 多选 / 图标 / 列） | `crates/zsdesk-ui/src/filelist/` |
+| `nav_host` | `<custom>` | **Rust 自绘**（导航树：`IShellItem` 枚举） | `crates/zsdesk-ui/src/navtree/` |
+| `preview_image` | `<custom>` | **Rust 自绘**（预览图片：`ui_bitmap_create` + `ui_draw_bitmap_handle`，D06-1） | `crates/zsdesk-ui/src/preview/` |
+| `preview_body`（`preview.uix` 内） | `<custom>` | 同上（独立预览页里的图片位） | 同上 |
+| `breadcrumb` | `<label>` | **文本投影**（Rust `ui_label_set_text`） | 状态投影在 `crates/zsdesk-app/src/app.rs`；写控件在 `crates/zsdesk-ui/src/shell_page.rs` |
+| `preview_host` | `<div>` | 容器（放 `preview_image` + 4 个 `<label class="preview-meta">`：`preview_host_name` / `_size` / `_channel` / `_state`） | — |
+
+**判定规则与三条裁定的完整理由见 `spec/ffi-core-ui.md` §4.3.4。**
 
 ---
 
@@ -336,7 +392,8 @@ accent=#3971EC source=default(library)
 | **S8** | **绑定面 vs 导出表** | 绑定层声明的符号 ⊆ S7 实测集合；必需∩可选=∅；必需不含 12 个「本机独有」符号 | 改绑定 | `python3 scripts/check-coreui-api.py` |
 | **S9** | **crate 依赖无环** | `cargo metadata` 解析出的依赖图有环 | 修正 | `python3 scripts/gates/check_crate_dag.py` |
 | **S10** | **FFI 层无业务依赖** | `zsdesk-coreui/Cargo.toml` 含指向业务 crate 的 path 依赖 | 修正 | 同上 |
-| **S13** | **token 不撞名** | 不得定义**库 token 全集 34 个**（含 `--accent`）；**`.uix`** 不得定义 `--app-accent`；**`themes.json` 允许** `--app-accent`（D14 的回退源值，Rust **不得**把它注入 `:root`）；`.uix` 不得 `var(--app-accent)` | 改资源 | 见 `docs/12-UIX-TAG-FIX.md` §4.3 + `spec/ffi-core-ui.md` §5.6.1 |
+| **S13** | **token 不撞名** | 不得定义**库 token 全集 34 个**（含 `--accent`）；**`.uix`** 不得定义 `--app-accent`；**`themes.json` 允许** `--app-accent`（D14 的回退源值，Rust **不得**把它注入 `:root`）；`.uix` 不得 `var(--app-accent)` | 改资源 | ✅ 脚本已落地：`scripts/gates/s13_token_namespace_check.py --root .`（⏳ **CI 尚未调用**，见 `spec/ci-contract.md` §4.8） |
+| **id 清单** | **期望 id 集合 == `.uix` 实际 id 集合**（含逐页条数 + 同页重 id） | 资产加 id 而清单没同步 → Rust 漏取句柄 → **静默不刷新**（不报错）。期望集放在 `assets/ui-ids.json` | 改资产或改清单 | ✅ 脚本已落地：`scripts/gates/ui_id_manifest_check.py --root .`（⏳ CI 尚未调用） |
 
 **首次基线**：Phase 3 开工前跑 `python3 scripts/gates/verify.py --phase 3`，
 把结果落盘。**没有基线，后面「改坏了」无法判定。**

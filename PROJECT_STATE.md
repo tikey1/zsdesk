@@ -27,35 +27,40 @@
 | 界面资产修正对照表 + 真机首查清单（前端） | `docs/12-UIX-TAG-FIX.md`、`docs/13-UIX-FIRST-RENDER-CHECKLIST.md` |
 | **QA 独立复核报告**（8 项裁决 + 3 阻塞 + 7 重要 + 第二轮） | `docs/14-QA-UIX-REVIEW.md` |
 | 技术契约（FFI / 目录 / 迁移矩阵 / CI / 里程碑 / ADR） | `spec/` |
-| FFI 绑定骨架（Rust，运行时动态加载） | `spec/rust-ffi-skeleton/` |
-| 13 项机械门禁（可复跑、失败即停） | `scripts/gates/` |
+| FFI 绑定层（Rust，运行时动态加载） | `crates/zsdesk-coreui/` |
+| `:root` 注入模块（形态甲 + 9 条单元测试） | `crates/zsdesk-coreui/src/lib/theme.rs` |
+| 六个机械门禁（可复跑、失败即停） | `scripts/gates/` |
+| ui id 清单（Rust ↔ `.uix` 的单一事实源） | `assets/ui-ids.json` |
 | CI 工作流（三 job：rust / core-ui / package） | `.github/workflows/build.yml` |
 | CI 说明与实跑记录 | `docs/ci.md` |
+| **剩余工作流程快照**（本次收尾） | `docs/15-REMAINING-WORK.md` |
 
 ## 进行中
-| 谁 | 做到哪 | 卡在哪 |
+**本轮（2026-11-13 收尾）已停止代码编写**，成果全部落盘并推送。
+| 谁 | 做到哪 | 状态 |
 |---|---|---|
-| 高见远（架构师） | Spec v3、`ci-contract.md` v3 两栏、D10/D11/D12 定稿 | 等 `:root` 注入契约与戳记归属收口 |
-| 严过关（QA） | 第二轮：B2 确认、I5 修对比度脚本、CI 契约一致性核对 | 等前端 B3 重贴输出 |
-| 贾思敏（前端） | 修 B1（`:root` 注入说明）、B3（重贴输出）、I4（删字重提 14px） | 等 B1 合并口径落地 |
-| 卜宕机（运维） | `spec/ci-implementation-notes.md` 独立评审 | 待回传 |
-| 大湾区靓仔（交付总监） | 盯 CI；等 core-ui 编译结果 | 第四次 CI `d2964ce` 运行中 |
+| 高见远（架构师） | Spec v3、契约两栏、D10~D12、D15、D17~D20 落定 | ✅ 本轮收口 |
+| 严过关（QA） | 第九轮复核：抓出 BOM / `:root` 外定义 / 门禁无执行器 / 戳记覆盖 4 个 P1，全部已修 | ✅ 本轮收口 |
+| 贾思敏（前端） | `nav_host` → `<custom>`；R5 宿主判定表补齐；句柄数 27→32 全文同步 | ✅ 本轮收口 |
+| 卜宕机（运维） | CI 独立评审：R0（package job 缺 zsui）等 P0 已修 | ✅ 本轮收口 |
+| 大湾区靓仔（交付总监） | CI 根因定位 + 门禁接线 + 收尾推送 | ⏸️ **代码暂停编写**，等 CI 结果 |
 
 ## 待决策
 | # | 决策点 | 状态 |
 |---|---|---|
 | D14 | 包体积红线（10 MB）是否放宽 | **待 CI 实测后**由用户拍板（现为估算，不凭估算问） |
 | D15 | 文本预览上限与编码策略 | 可后置到 M2，PM 已给建议 |
+| D21 | core-ui 构建若反复失败：改用 `cl.exe` / 改用本机定制 DLL 作为过渡 | **待 CI 结果**，退路已在 `docs/15` §2.1 记录 |
 
 ## 风险（Top 3）
-1. **core-ui 的 C++ 构建在 CI 上不过** —— 已连续三次失败，根因从「可能是 FetchContent 联网」收敛到「脚本 1 秒即抛错 → vcvars 环境抓取不稳」。第四次改为 `ilammy/msvc-dev-cmd` 导入 MSVC 环境 + 直接调 cmake + `-DFETCHCONTENT_SOURCE_DIR_QUICKJS` 消除下载；失败时用 `::error::` 做成 check-run annotation（外部可经公开 API 读到）。
-2. **本机无 Rust/C++ 工具链** → 一切编译验证只能靠 CI；且本机 GitHub API 未认证额度仅 60/小时，CI 查询要靠 WorkBuddy 服务端通道或等额度恢复。
-3. **QA 已确认的三个 P0（`<window>` 自闭合 / `text=` 无效 / `window{}` 不匹配）会让首版界面整页加载失败** —— 前端已修，QA 已复核通过；剩余 B1（`:root` 注入位置）与 B3（输出不可复现）在修。
+1. **core-ui 的 C++ 构建在 CI 上不过** —— 连续两次失败的根因**已定性为「日志管道被 PowerShell 中断」**（`$PSNativeCommandUseErrorActionPreference` 默认 `$true` ⇒ clang-cl 写一行 warning 到 stderr 就抛异常中断管道 ⇒ 诊断从未落盘），修法已进 `build.yml`，**但尚未跑过一次修复后的 CI**。详见 `docs/15-REMAINING-WORK.md` §2.1。
+2. **本机无 Rust/C++ 工具链** → 一切编译验证只能靠 CI。本轮已用 tree-sitter 做 Rust 语法级验证（零错误），但**类型级/借用检查器层面的验证只能靠 CI 的 `cargo test`**。
+3. **多处失败模式是「静默」**（注入被吃掉 / 宿主标签错 / 句柄失效）—— 零报错、界面不对。已整理成 `docs/15` §4.2 的症状→根因对照表。
 
 ## 下一步
-1. 第四次 CI 出结果 → 读 error annotation 定位 core-ui 编译/配置的确切问题 → 修 → 直到 core-ui job 绿，拿到便携 ZIP。
-2. 前端修完 B1/B3/I4 → QA 第三轮复核 → `assets/` 入库 → M1 开工（core-ui 窗口 + 自绘文件列表）。
-3. M1 的第一步按架构师的最早探测顺序做：`ui_core_version*` → `ui_init_with_theme` → `ui_page_load_string` → `ui_page_open_window` → `ui_run`，逐项最小验证 U01~U03。
+1. **读本次推送触发的 CI 结果**：core-ui job 若绿 → 进 M1；若红 → 此时日志里有**真正的 clang 报错**，按报错定位（不再是「看不到日志」的困境）。
+2. **M1 开工**：Rust 侧真正用 core-ui 装上面板 —— 读 `assets/*.uix` → 注入 `:root` → `ui_page_load_string` → 取 32 个句柄 → 自绘列表/导航树 → GuoheView 预览。
+3. **主题切换链路**：`ui_theme_set_mode` → 重建页面 → 重取全部 32 个句柄 + 在新 page 上重新注册 `ui_page_on_widget_mount` 钩子 + 重读 AccentColor 并重调 `ui_theme_set_accent_hex`。
 
 ## 协作纪律（已立）
 - **git 操作统一由交付总监执行**；成员只写文件。已发生两次成员抢先 commit 导致 push 被 `&&` 短路。

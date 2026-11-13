@@ -113,7 +113,7 @@
 | 滚动 | `ScrollView` **非虚拟化**；文件列表必须用 `<custom>` 自绘 + Rust 侧做虚拟化 |
 | 窗口几何单位 | **DIP**（1/96 英寸），物理像素 = DIP × monitor_dpi ÷ 96 |
 | 样式 | CSS 子集；未知属性被忽略；`display:inline/block/inline-block` 语义与浏览器一致 |
-| 调试 | `ui_debug_*` 族 **71 个导出声明**（`grep -c "UI_API.*ui_debug_" include/ui_core.h` = 71；头文件全文出现该前缀 73 处，含 2 处注释提及）—— 控件树导出、高亮、截图、事件模拟，可在没有真机窗口时定位问题 |
+| 调试 | `ui_debug_*` 族 **71 个导出声明**（`grep -c "UI_API.*ui_debug_" include/ui_core.h` = 71）；头文件全文 **83 行**提到该前缀（`grep -c "ui_debug_" include/ui_core.h` = 83）。<br>（若按唯一符号名统计会得到 **73** 个：其中 **2 个是注释里的前缀占位** —— `ui_debug_*` 与 `ui_debug_post_*` 的 `*` 被正则当分隔符截断，不是真符号；**真符号仍是 71 个**。）—— 控件树导出、高亮、截图、事件模拟，可在没有真机窗口时定位问题 |
 
 ---
 

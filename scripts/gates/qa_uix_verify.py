@@ -94,13 +94,17 @@ LIB_TOKENS = {
 
 # --------------------------------------------------------------------------
 # 4. 必须保全的 id（Rust 侧靠 ui_widget_find_by_id 取句柄）
-#    实测自 git show HEAD:assets/*.uix，逐个核对拼写与大小写
+#    基线 = 2026-11-13 16:43 读数（前端当轮把 preview_body / preview_image 等宿主
+#    容器改成 <custom> 并新增 5 个 id）。**钉死值的作用是发现「无意丢失」**，
+#    前端有意改动后必须由 QA 重新钉基线，并在 docs/14 记录改前/改后两组数字。
 # --------------------------------------------------------------------------
 EXPECTED_IDS = {
     "assets/main.uix": {
         "titlebar_host", "global_search", "tab_host", "tab_placeholder",
         "command_host", "nav_hint", "address_host", "breadcrumb", "address",
         "search", "infobar_host", "nav_host", "list_host", "preview_host",
+        "preview_image", "preview_host_name", "preview_host_size",
+        "preview_host_channel", "preview_host_state",
         "status_host", "status_item_count", "status_selected", "status_text",
         "status_progress", "status_thumb_cache", "status_image_channel",
     },
@@ -113,7 +117,7 @@ EXPECTED_IDS = {
 
 # 模板体元素数（不含 window/style/template 三个 SFC 外壳标签）
 EXPECTED_TEMPLATE_ELEMENTS = {
-    "assets/main.uix": 30,
+    "assets/main.uix": 35,
     "assets/preview.uix": 9,
     "assets/about.uix": 16,
 }
@@ -125,6 +129,67 @@ FORBIDDEN_ATTRS = (
 )
 TEXT_TAGS = {"span", "label", "p", "h1", "h2", "h3", "h4", "h5", "h6",
              "small", "strong", "em", "a"}
+
+
+# --------------------------------------------------------------------------
+# 4b. 主题分支选择器 / 条件规则 白名单
+#    源：src/ui/css/selector.cpp:6-15 PseudoToBit —— 只认
+#        hover / pressed(active) / focus / disabled / checked / root / drag-over
+#        其余伪类 bit=0 → MatchSimple 直接 false（selector.cpp:60-64）→ 永不命中
+#    源：src/ui/css/css_parser.cpp:319-333 SkipAtRule —— @media/@supports 整块跳过
+# --------------------------------------------------------------------------
+THEME_BRANCH_CLASSES = {
+    "dark", "light", "theme-dark", "theme-light", "dark-mode", "light-mode",
+}
+THEME_BRANCH_ATTRS = ("data-theme", "data-mode", "data-color-scheme", "theme")
+AT_RULES = ("media", "supports", "container", "layer")
+
+
+def strip_at_rules(css: str):
+    """剥掉 @xxx { ... } 整块（core-ui 解析器直接跳过它们），返回 (剩余 css, at-rule 名列表)。
+
+    与上游 SkipAtRule 同语义：@media/@supports 的**整块内容**被丢弃，不报错。
+    """
+    found, out, i = [], [], 0
+    pat = re.compile(r"@([A-Za-z-]+)")
+    while i < len(css):
+        m = pat.search(css, i)
+        if not m:
+            out.append(css[i:])
+            break
+        out.append(css[i:m.start()])
+        found.append(m.group(1).lower())
+        j, depth = m.end(), 0
+        while j < len(css):
+            ch = css[j]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth <= 0:
+                    j += 1
+                    break
+            elif ch == ";" and depth == 0:
+                j += 1
+                break
+            j += 1
+        i = j
+    return "".join(out), found
+
+
+def iter_flat_rules(css: str):
+    """产出 (选择器文本, 声明块) —— 括号感知的最小扫描（用于 at-rule 已剥离的 CSS）。"""
+    depth, sel_start, body_start = 0, 0, None
+    for i, ch in enumerate(css):
+        if ch == "{":
+            depth += 1
+            if depth == 1:
+                body_start = i + 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0 and body_start is not None:
+                yield css[sel_start:body_start - 1], css[body_start:i]
+                sel_start, body_start = i + 1, None
 
 
 # --------------------------------------------------------------------------
@@ -399,6 +464,56 @@ def check_file(rel: str, root: Path, rep: Report, themes: dict):
             wd, dd = worst["dark"]
             rep.ok(f"G05 双主题对比度：真实配对全部 ≥4.5:1"
                    f"（light 最低 {wl:.2f}:1 {dl} / dark 最低 {wd:.2f}:1 {dd}）")
+
+    # --- 14. 主题分支选择器 / 条件规则（core-ui 不支持，静默失效）---
+    css_no_at, at_rules = strip_at_rules(css)
+    hit_at = sorted({a for a in at_rules if a in AT_RULES})
+    for a in hit_at:
+        rep.fail(f"{rel}: CSS 里有 @{a} 规则 → **整块被解析器丢弃、静默失效**"
+                 f"（css_parser.cpp:319-333 SkipAtRule：'v0 doesn't honor them "
+                 f"but won't error out'）")
+    if not hit_at:
+        rep.ok(f"无主题条件规则（无 @media/@supports）"
+               f"（at-rule 名单：{sorted(set(at_rules)) or '无'}）")
+    theme_sel_hits = []
+    for sel, _body in iter_flat_rules(css_no_at):
+        for c in THEME_BRANCH_CLASSES:
+            if re.search(rf"(?<![\w-])\.{re.escape(c)}(?![\w-])", sel):
+                theme_sel_hits.append((c, sel.strip()))
+        for a in THEME_BRANCH_ATTRS:
+            if re.search(rf"\[\s*{re.escape(a)}\s*[~^$*|]?=", sel):
+                theme_sel_hits.append((f"[{a}", sel.strip()))
+    for c, sel in theme_sel_hits:
+        rep.fail(f"{rel}: 主题分支选择器 `{c}`（`{sel}`）→ **永远不命中**"
+                 f"（core-ui 无主题态位：PseudoToBit 只认 hover/pressed/focus/"
+                 f"disabled/checked/root/drag-over，selector.cpp:6-15；"
+                 f"未知伪类 bit=0 → MatchSimple 直接 false，selector.cpp:60-64）")
+    if not theme_sel_hits:
+        rep.ok("无主题分支选择器（无 .dark/.light/[data-theme=…]）")
+
+    # --- 15. :root 与 --app-* 冲突（口径 ⑤ 的静态侧兑现）---
+    root_defs = []
+    for sel, body in iter_flat_rules(css_no_at):
+        if re.search(r"(?<![\w-]):root(?![\w-])", sel):
+            root_defs += re.findall(r"(--[A-Za-z0-9_-]+)\s*:", body)
+    app_conflict = sorted({d for d in root_defs if d.startswith("--app-")})
+    if app_conflict:
+        rep.fail(f"{rel}: :root 块里定义了 {app_conflict} —— 与 Rust 注入的 token 同名，"
+                 f"**两者只有一个生效、另一个被静默丢弃**（自定义属性先定义者赢："
+                 f"LookupVar 返回第一个命中 value.cpp:572-579；:root 规则不进 CSS 级叠 "
+                 f"cascade.cpp:124-125）→ 口径 ⑤ 要求注入的 :root 必须是源码中第一个 :root")
+    elif root_defs:
+        rep.warn(f"{rel}: 有 :root 块（定义了 {sorted(set(root_defs))}）—— "
+                 f"不与 --app-* 撞名，但**改变了注入块的优先级顺序**（口径 ⑤）")
+    else:
+        rep.ok("`:root` 块数 0 → Rust 注入的 :root 必然是源码中第一个 :root（口径 ⑤ 成立）")
+
+    # --- 16. var(--app-accent) 不得出现在 .uix（口径 ③）---
+    if re.search(r"var\(\s*--app-accent\b", css):
+        rep.fail(f"{rel}: 出现 var(--app-accent) —— 它是 Rust 的【回退源值（数据字段）】，"
+                 f"不是 CSS 变量，不进 :root；.uix 一律读库 token var(--accent)")
+    else:
+        rep.ok("无 var(--app-accent)（accent 走库 token var(--accent)）")
 
 
 def main() -> int:

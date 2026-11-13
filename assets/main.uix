@@ -54,13 +54,28 @@
          永远不会被画出来，线条颜色写死 theme::kDivider()（light #D1D1D1 /
          dark #424242）。要让分隔线走项目 token --app-divider 必须用 div。
          上游 demo 同款做法：<div class="sep"/> + height:1 + background。
-      7. 列表宿主 <div id="list_host"> → <custom id="list_host">（架构裁定）：
-         列表由 Rust 侧 ui_custom_on_draw 自绘，而 ui_custom_on_draw 内部是
-         As<ui::CustomWidget>(w) —— 对 <div> 宿主调用会静默 no-op（不报错、
-         不生效）；且运行时 ui_custom() 造出来的控件没有 CSS 级联结果，
-         无 flex/width/height → 在 flex 容器里尺寸 0 → 列表区空白。
-         写成 <custom> 后，widget_factory.cpp:1114-1118 明确「CSS width/height
-         走 ApplyCommonStyle 自然生效」→ .list-host { flex: 1 } 生效。
+      7. 【第五轮：宿主形态按「内容是不是 Rust 用绘制指令画出来的」判定（架构裁定）】
+         是（Rust 画）→ <custom>；否（core-ui 控件 / 文本投影）→ <div> / <label>；
+         混合 → <div> 容器 + 里面的 <custom> 子宿主。
+         据此本文件三处：
+           list_host    Rust 自绘（文件列表）  → <custom>（第四轮已改）
+           nav_host     Rust 自绘（导航树）    → <custom>（第四轮已改）
+           breadcrumb   文本投影              → <label>（本轮改：原来是空 <div>，
+                                                  显示不出任何东西；Rust 用
+                                                  ui_label_set_text(w, L"…") 填）
+           preview_host 混合（图片+元信息）   → <div> 容器 + <custom id="preview_image">
+                                                  + 预先声明的 <label> 元信息行
+      8. 【宿主标签通用规则（交付总监第四轮裁定）】
+         凡是由 Rust 自绘内容的宿主容器 → 必须是 <custom>；
+         由 core-ui 内置控件填充的宿主 → 用 <div>。
+         理由：<div> 拿不到绘制回调（ui_custom_on_draw 内部是
+         As<ui::CustomWidget>，取不到就静默 no-op），且运行时挂载的控件没有
+         CSS 级联结果 → flex 规则失效 → 尺寸 0 → 区域空白且无任何报错。
+         按此规则（架构 D06 / D07 / D12）：
+           list_host    Rust 自绘（文件列表）   → <custom>  ✔ 已改
+           nav_host     Rust 自绘（导航树）     → <custom>  ✔ 已改
+           breadcrumb   core-ui 控件（标签序列）→ <div>     保持
+           preview_host core-ui 控件（<gh-img-view> 等）→ <div> 保持
          与 D-15 相容：<custom> 是空的自绘画布，「行」仍全部由 Rust 画。
 
     三、已知遗留（须真机确认，见 docs/13-UIX-FIRST-RENDER-CHECKLIST.md）
@@ -127,6 +142,11 @@
   .nav-host { width: 220px; background: var(--app-sidebar-bg); }
   .list-host { flex: 1; background: var(--app-content-bg); }
   .preview-host { width: 320px; background: var(--app-sidebar-bg); }
+  /* 预览窗格：容器（div）+ 图片位（custom，Rust 在 draw 回调里 blit）
+     + 预先声明的元信息行（label，Rust 用 ui_label_set_text 投影文本）。
+     图片位高度 128px = docs/07 §3 的「图片 ≤128px」上限，缩放由 Rust 按 fit 算。 */
+  .preview-image { height: 128px; background: var(--app-content-bg); }
+  .preview-meta { display: block; padding: 4px 8px; color: var(--app-text-secondary); white-space: nowrap; }
   /* 竖向分隔线：core-ui 的 <Separator> 只有水平形态，竖线用 1px 宽的 div */
   .vsep { width: 1px; background: var(--app-divider); align-self: stretch; flex-shrink: 0; }
 
@@ -162,18 +182,24 @@
     </div>
     <div class="divider" />
     <div id="address_host" class="addressbar">
-      <div id="breadcrumb" class="breadcrumb" />
+      <label id="breadcrumb" class="breadcrumb" />
       <input id="address" class="address" />
       <input id="search" class="search" />
     </div>
     <div class="divider" />
     <div id="infobar_host" class="infobar" />
     <div class="main-area">
-      <div id="nav_host" class="nav-host" />
+      <custom id="nav_host" class="nav-host" />
       <div class="vsep" />
       <custom id="list_host" class="list-host" />
       <div class="vsep" />
-      <div id="preview_host" class="preview-host" />
+      <div id="preview_host" class="preview-host">
+        <custom id="preview_image" class="preview-image" />
+        <label id="preview_host_name" class="preview-meta" />
+        <label id="preview_host_size" class="preview-meta" />
+        <label id="preview_host_channel" class="preview-meta" />
+        <label id="preview_host_state" class="preview-meta" />
+      </div>
     </div>
     <div class="divider" />
     <div id="status_host" class="statusbar">

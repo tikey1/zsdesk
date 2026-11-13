@@ -176,17 +176,24 @@ core-ui 内部**没有为 widget 树加锁**，跨线程调用是数据竞争。
 
 > 选项编号沿用前端 `docs/12-UIX-TAG-FIX.md` R5 的口径：
 > **(a) = 运行时 `ui_custom()` + `ui_widget_add_child()`**；
-> **(b) = `.uix` 里声明 `<custom id="file_list"/>`**。
+> **(b) = `.uix` 里声明 `<custom id="list_host"/>`**。
 > **裁定：选 (b)。**
 
-**决定：`.uix` 里写 `<custom id="file_list" class="list-host"/>`，
-Rust 用 `ui_page_on_widget_mount(page, "file_list", cb, ud)` 取句柄后挂绘制回调。**
+**决定：`.uix` 里写 `<custom id="list_host" class="list-host"/>`，
+Rust 用 `ui_page_on_widget_mount(page, "list_host", cb, ud)` 取句柄后挂绘制回调。**
+
+> ★ **id 用 `list_host`，不用 `file_list`**（2026-11-13 修正）：
+> 资产里这个宿主的既有 id 是 **`list_host`**（`.uix` 与 `docs/12` §3.1 表、§5 R5 都写 `list_host`）。
+> **id 是 Rust 侧与 `.uix` 之间的契约**（`ui_widget_find_by_id` / `ui_page_on_widget_mount` / `<menu trigger="#…">` 三处都用它）
+> → **以资产为准**。本文件此前举例写的 `file_list` / `list_list` 是笔误，**已全部改正**。
+> 后续新增宿主时，**id 命名规则 = `<区域>_host`**（`nav_host` / `list_host` / `preview_host` …）。
 
 **理由（决定性的一条是布局，不是 API 好不好用）：**
 
 | 判据 | (a) 运行时挂载 | (b) 静态声明 |
 |---|---|---|
 | **尺寸从哪来** | 运行时 `ui_custom()` 造的控件**没有 CSS 级联结果** → 无 `flex-grow` / `width` / `height` → 在 flex 容器里**尺寸为 0** → **列表区空白** | core-ui 的工厂对 `<custom>` 明确走 CSS：`widget_factory.cpp:1114-1118` 注释原文「**CSS width/height 走 ApplyCommonStyle 自然生效**」→ `.list-host { flex: 1; }` 生效 |
+| **CSS 到底在哪一步生效（源码级）** | `ApplyCommonStyle` 只有**两个**调用点：`compiler.cpp:920`（模板里的节点）与 `widget_factory.cpp:1363`（工厂造的节点）。运行时 `ui_custom()`（`ui_api.cpp:2605-2610`）**只 new 一个控件并注册**，**不经过任何一条** → 拿不到 CSS | 走工厂 → `ApplyCommonStyle` → CSS 生效 |
 | 回调是否可能 no-op | 否（自己造的必然是 CustomWidget） | **可能**：`ui_custom_on_draw` 的实现是 `As<ui::CustomWidget>(w)`，取不到就**静默 no-op**（`ui_api.cpp:2612-2616`）。但 `<custom>` 标签在工厂里**必然**造 CustomWidget → 不会 no-op |
 | 布局重算 | `ui_widget_add_child` 会 `MarkLayoutAndRepaint()`，flex 会重跑（`flex.cpp` 遍历 live children）→ 但尺寸仍是 0 | 不需要 |
 | Rust 要不要自己管 resize | 要（`ui_widget_set_size` + 每次 resize 跟随）→ 脆弱 | 不要 |
@@ -201,12 +208,29 @@ Rust 用 `ui_page_on_widget_mount(page, "file_list", cb, ud)` 取句柄后挂绘
 
 | 路 | 做法 | 评价 |
 |---|---|---|
-| `ui_page_on_widget_mount(page, "file_list", cb, ud)` | 按 id **持久化**注册；页面重建后**自动回填**新实例 | ✅ **推荐**：主题切换会重建页面（§5.6.1），持久化回调能自动接上 |
-| `ui_widget_find_by_id(page_root, "file_list")` | 直接按 id 取句柄 | 可用，但**页面重建后必须重取**（旧句柄失效） |
+| `ui_widget_find_by_id(page_root, "list_host")` | 直接按 id 取句柄 | ✅ **推荐**：语义直白，句柄表由 Rust 显式持有 → **重建后必须重取**（§4.6） |
+
+> ★ **同一棵树内 id 必须唯一**（2026-11-13 前端提问时我核过源码）：
+> `Widget::FindById`（`src/ui/widget.cpp:619-626`）是**深度优先、整棵子树、首个命中**的查找
+> （先比 `this->id`，再按 `children_` 顺序递归，**命中即返回**）→
+> **同一棵树里出现重 id → `ui_widget_find_by_id` 会取到 DFS 里靠前的那个**，另一个**永远取不到**，且**不报错**。
+> → 命名规则：`main.uix` 预览窗格内的控件用 **`preview_host_*`** 前缀，`preview.uix` 自己的用 `preview_*`；
+> 将来若把某个页面的根**嫁接**进另一棵树，两边 id 也不会撞。
+| `ui_page_on_widget_mount(page, "list_host", cb, ud)` | 按 id **持久化**注册挂载钩子 | ✅ 配合使用：**同一个 page 内**控件后来才出现（v-if/v-for 重建）→ 钩子自动补发；**注册时若树上已有同 id 控件会立刻调一次**（`page_state.cpp:635-652` 的 catch-up） |
+
+> ★ **重要更正（2026-11-13，架构侧核对源码后修正自己上一版的措辞）**：
+> `ui_page_on_widget_mount` 的钩子**挂在具体 page 上**（`page_api.cpp:850-854` → `e->state->OnWidgetMount`，
+> 存进该 `PageState` 的 `lifecycleHooks_`）。
+> → **同一个 page 内**的晚出现控件会自动补发 ✅；
+> → **切主题重建出新 page 后**，新 page 是**全新的 `PageState`**，`lifecycleHooks_` 是**空的**
+> → **钩子不会自动转移** ❌ → **Rust 必须在新 page 上重新注册**
+> （`ui_page_on_widget_mount(new_page, "list_host", cb, ud)`；因为有 catch-up，**注册即触发**，不必等下一次挂载）。
+> → 详见 §4.6。
 
 **页面重建时的自绘控件**：(b) 方案下 `<custom>` 是**静态声明**的 → 页面重建后
-core-ui 会**重新造**一个 CustomWidget → **Rust 只需重挂回调**（`ui_page_on_widget_mount`
-会自动回填），**不需要**重新 `ui_widget_add_child`。这比 (a) 少一层状态管理。
+core-ui 会**重新造**一个 CustomWidget → Rust 需要**在新 page 上重新注册挂载钩子**
+（`ui_page_on_widget_mount(new_page, id, cb, ud)`，catch-up 保证立即触发）**并重取句柄**。
+这比 (a) 少一层状态管理（不用 `ui_widget_add_child`），但**不省「重新注册」这一步**。
 
 ### 4.3.2 页面用 `ui_page_load_string` 加载，不是 `ui_page_load_file`（D10 的直接后果）
 
@@ -221,7 +245,9 @@ core-ui 会**重新造**一个 CustomWidget → **Rust 只需重挂回调**（`u
 | **打包后果** | ★ **`.uix` 与 `themes.json` 必须以文件形式进包** —— Rust 要在运行时读它们并拼源码。若只打进 exe 就无法注入 `:root` |
 | 主题切换 | `ui_page_reload` 会**重放旧源码**（改不了 palette）→ 切换明暗必须**重新 `ui_page_load_string` 一个新页面**，并重走 §4.3.1 的装配流程 |
 
-#### 4.3.2.1 ★ `:root` 注入的**四条硬规则**（QA B1 复核 + 架构侧核对）
+#### 4.3.2.1 ★ `:root` 注入的**六条硬规则**（QA B1 复核 + 架构侧核对 + QA 第五轮 Δ-A 纠正）
+
+> **★ 位置口径以 D20 为准**：`DECISIONS.md` **D15-F1** 早期写的「拼进**已有的** `<style>` 块内部、该块**最后一行** `</style>` 之前」——**该位置作废**（first-wins 下，放在块尾仍可能被页面自己的 `:root` 抢先）；现按 **D20 = 甲（源码最前面插入一个完整的 `<style>` 块）**。D15-F1 的其余部分（`:root` 内只允许 `--app-*`）**仍有效**。
 
 > **背景**：QA 独立核实发现 —— `:root` 块若拼在 `.uix` **源码顶层**（不在 `<style>` 内）→
 > `sfc_parser.cpp:260-267` 报 `unexpected content at top level` → `doc.ok = false` →
@@ -242,15 +268,18 @@ if (c.peek() != '<') {
 
 顶层**只允许**这六种标签：`<window>` `<template>` `<script>` `<style>` `<import>` `<link>`。
 
-**两种合法注入形态**（等价，任选其一）：
+**两种合法注入形态**（**关键：注入的 `:root` 必须是源码里「第一个」`:root`**，理由见规则 4）：
 
 | 形态 | 做法 | 说明 |
 |---|---|---|
-| **甲（推荐）** | 在源码**末尾追加一个完整的 `<style>` 块**：`<style>\n:root{…}\n</style>` | `<style>` 是**允许的顶层标签** ✓；**多个 `<style>` 块是允许的**（`sfc_parser.cpp:321-330`：`doc.styles.push_back(blk)`，**没有** duplicate 检查）；且天然保证注入的 `:root` 在 source order 上**最后** |
-| 乙 | 在**已有的** `<style>` 块内部、其 `</style>` 之前插入 `:root{…}` | 要求该 `.uix` **必须已有** `<style>` 块，否则无处可去；且只有当该块是**最后一个** `<style>` 时才满足「source order 最后」 |
+| **甲（推荐）** | 在源码**最前面插入一个完整的 `<style>` 块**：`<style>\n:root{…}\n</style>\n` + 原源码 | `<style>` 是**允许的顶层标签** ✓；**多个 `<style>` 块允许**（`sfc_parser.cpp:321-330`：`doc.styles.push_back(blk)`，**没有** duplicate 检查）；**inline 顶层块顺序无关**（解析器按标签名分派到各自容器，`<window>` / `<template>` / inline `<style>` 谁先都行）→ 插在**最前面**天然保证 Rust 的 `:root` 是**第一个** `:root` ✓
+> ⚠️ **但 `<link>` 是例外**（QA 2026-11-13 指出）：`<link>` 引的 CSS 由 `ResolveLinkBlocks` 决定位置，**恒排在 inline `<style>` 之前**，与它在源码里的位置无关 → **`<link>` 的 CSS 里若定义了 `:root`，注入值仍会输**。本项目三个资产**零 `<link>`** → 前提成立；Rust 自检断言 2 会顺手查「源码里没有 `<link rel="stylesheet">"`」。 |
+| 乙 | 在**第一个** `<style>` 块内部、其 `<style>` **开头**插入 `:root{…}` | 要求该 `.uix` **必须已有** `<style>` 块；且该块必须是**源码中第一个含 `:root` 的块** → 插入点在其块首 → Rust 的 `:root` 仍是最先 ✓ |
 
-> **推荐甲**：不依赖对已有块的解析，且天然满足「注入值在 source order 最后」
-> （自定义属性同特异性下，**后者覆盖前者**）。
+> **推荐甲**：不依赖对已有块的解析，且**天然**满足「Rust 的 `:root` 最先」——
+> 即使将来 `.uix` 自己加了 `:root`（在后面的块里），**Rust 的值仍然赢**（规则 4：先定义者赢）。
+> ⚠️ **不要用「在源码末尾追加」**：那样一旦 `.uix` 里出现自己的 `:root`，**`.uix` 的值会赢**，
+> Rust 的注入被**静默忽略** → 症状是「切主题颜色不变」，没有任何报错（规则 4）。
 
 **规则 2 —— `:root` 内只允许 CSS 变量声明**
 
@@ -270,20 +299,79 @@ if (IsRootSelector(sel)) continue;
 
 - **顺序**：`:root` 注入 → `ui_page_load_string`。晚一步 → 自定义属性不存在 →
   `var(--app-bg)` 解析失败 → **静默回落到库默认色**，界面白得像「能跑」但配色全错。
-- **fail-fast 自检（Rust 侧，load 之前）**：
-  1. 解析注入后的源码，找出所有 `<style …> … </style>` 块的**区间**；
-  2. 断言每个 `:root` 的出现位置**落在某个区间内**；
-  3. 不满足 → **在 Rust 侧直接失败**并给出「`:root` 必须在 `<style>` 块内」的具体提示
-     —— **不许**把这个错误留到 core-ui 侧报成 "SFC parse failed"。
+- **fail-fast 自检（Rust 侧，load 之前）—— 四条断言**：
+  1. **位置**：解析注入后的源码，找出所有 `<style …> … </style>` 块的**区间**；
+     断言每个 `:root` 的出现位置**落在某个区间内**；
+  2. **顺序**：断言**注入块是整张样式表里第一个 `:root`**（即：除注入块外，源码中**没有**任何 `:root`
+     出现在注入块**之前**，**且**源码里**没有 `<link rel="stylesheet">`** —— `<link>` 的 CSS 排在 inline 之前
+     （`page_api.cpp:271-277`），它里面的 `:root` 会**先定义者赢**，把 Rust 的值吃掉（规则 4 / 证据 B））；
+  3. **内容**：断言 `:root` 块内**每条声明**都匹配 `--app-[a-z0-9-]+\s*:`；
+     出现任何**非 `--app-*`** 的声明（即普通样式）→ fail-fast
+     （理由见规则 6：普通声明会被**静默丢弃**）；
+  4. **键集**：断言注入的键集 **不含 `--app-accent`**（规则 5）且**不含库 token 全集 34 个**（S13）。
+  任一条不满足 → **在 Rust 侧直接失败**，并给出**具体是哪一条**的错误提示
+  —— **不许**把这些问题留到 core-ui 侧：
+  ① 位置错 → 报成 "SFC parse failed"（看不出是 `:root` 越界）；
+  ② 顺序错 → **没有任何报错**，只是颜色不对（最难查）；
+  ③ 内容错 → **没有任何报错**，只是某些颜色没生效。
 
 > **为什么这条必须由 Rust 自检**：core-ui 的错误信息是
 > "unexpected content at top level"，**不指出行号、不区分是 `:root` 越界还是别的顶层内容**
 > → 现场极难定位。自检把「我拼错了」变成「我在拼之前就知道错了」。
 
-**规则 4 —— 注入的 `:root` 必须在 source order 上最后**
+**规则 4 —— ★ 注入的 `:root` 必须是源码中「第一个」`:root`（**先定义者赢**，不是后者覆盖前者）**
 
-自定义属性之间同特异性 → **source order 决定谁赢**。
-若 `.uix` 里将来也出现 `:root { --app-bg: … }`，必须保证 **Rust 的值生效** → 注入位置要靠后（形态甲天然满足）。
+> ⚠️ **本条在 2026-11-13 被 QA 纠正，架构侧已独立复核并改正**（此前写的是「必须最后」——**方向反了**）。
+
+**源码级依据（架构侧亲自复核，非转述）**：
+
+| 环节 | 源码 | 语义 |
+|---|---|---|
+| 收集 | `src/ui/css/cascade.cpp:20-33` `CollectRootVars` | 按 `sheet.rules` 的**文档顺序**推进 `vars` 向量；只收 `--` 开头的声明 |
+| 查值 | `src/ui/css/value.cpp:572-579` `LookupVar` | `for (auto& kv : vars) { if (kv.first == name) { out = kv.second; **return true**; } }` → **返回第一个命中** |
+| 佐证 | `src/ui/css/cascade.h:41` 注释逐字 | 「Collect all :root variables from stylesheet. **(Returns first set encountered.)**」 |
+| 级联 | `src/ui/css/cascade.cpp:125` | `:root` 规则**被整条跳过** → **根本不进 CSS 级联** |
+
+⇒ **自定义属性之间是「先定义者赢」**；「后者覆盖前者」的 CSS 常识**在这里不适用**
+（因为 `:root` 规则压根不参与级联，只是往一个**有序向量**里塞变量，查表时取**第一个**）。
+
+**同一个机制也解释了「用户 `:root` 值赢库默认」**：用户项在向量里排在库默认**之前** → first-wins → 用户赢 → **方向一致** ✓
+
+**因此**：
+
+| 场景（若 `.uix` 将来出现 `:root { --app-bg: … }`） | 结果 |
+|---|---|
+| ❌ **注入在源码末尾** | `.uix` 的 `:root` 在**前** → **`.uix` 的值赢** → Rust 的注入被**静默忽略** → 切主题颜色不变（**无任何报错**） |
+| ❌ **注入进最后一个 `<style>` 块** | 同上（`.uix` 的 `:root` 更早，仍输） |
+| ✅ **注入是第一个 `:root`** | Rust 的值赢 ✓ |
+
+**★ 完整表述（QA 第五轮补的三条证据让它从「可争论」变成「可判定」）：**
+
+| # | 事实 | 源码 | 对口径的作用 |
+|---|---|---|---|
+| **A** | `<style>` 块的规则按**块在源码里的先后**依次 push 进**同一张** `sheet.rules` | `src/ui/page/page_api.cpp:333-350`（`for (auto& blk : blocks) … for (auto& r : cssResult.stylesheet.rules) sheet.rules.push_back(...)`） | ⇒「源码里第一个 `:root`」**==**「`sheet.rules` 里第一个 `:root`」⇒ 口径**可写成断言** |
+| **B** | **`<link>` 引的 CSS 排在所有 inline `<style>` 之前** | `src/ui/page/page_api.cpp:271-277`（注释逐字「link-resolve first: external sheets cascade BEFORE inline `<style>`」；`ResolveLinkBlocks(sfc.links)` 先 push） | ⇒ 口径的**完整前提**是「**整张样式表**里的第一个 `:root`」，而**整张样式表 = `<link>` CSS（在前）+ inline `<style>`（在后）** ⇒ **`<link>` 引的 CSS 里也不能有 `:root`**（本项目三个资产**零 `<link>`** → 前提天然成立；Rust 自检顺手断言一下即可） |
+| **C** | SFC **顶层标签不限顺序**（顶层循环只判 tag 名，不判位置） | `src/ui/uix/sfc_parser.cpp:252-297` | ⇒ 把注入块放在**源码最前**语法上**合法**（已独立复核过一轮） |
+
+⇒ **口径 5 的正式措辞**：
+> **注入的 `:root` 必须是「整张样式表」里的第一个 `:root`** —— 整张样式表 = **`<link>` 引的 CSS（在前）** + **inline `<style>` 块（在后）**；
+> 本项目零 `<link>` → 等价于「**源码里第一个 `:root`**」。
+> Rust 实现：**在源码最前面插入**一个完整的 `<style>` 块（口径 1）→ 无条件成立。
+> Rust 自检：断言① 注入块之前没有 `:root`；② 源码里没有 `<link rel="stylesheet">`（有则必须人工确认那份 CSS 无 `:root`）。
+
+**今天为什么没暴露**：QA 实测 —— 三个 `.uix` 的**生效** `:root` 规则数 = **0**
+（`assets/main.uix` 那 3 处 `:root` 命中**全在 HTML 注释里**，剥注释后 = 0）→ 现在两种形态都能工作。
+**但这正是「静默失效」那一类雷**：一旦有人往 `.uix` 加一条 `:root`，症状是「切主题颜色不变」，现场极难定位。
+→ 规则 3 的**断言 2** 就是为此设的护栏。
+
+
+**★ D10 的三条源码级补强（QA 第五轮补证，架构侧复核确认 → 策略的依据更硬了）**
+
+| # | 事实 | 源码 | 对 D10 的意义 |
+|---|---|---|---|
+| 1 | `CollectVarsWithTheme` 先 `CollectRootVars(sheet)`（**用户在前**），再 `emplace_back` 库 token，且**带 `has()` 守卫** | `src/ui/page/compiler.cpp:1578-1590` | ⇒ **用户 `:root` 赢库默认**（first-wins 的直接后果）✓ 与规则 4 同源 |
+| 2 | `RebuildThemeVars` 在切模式时把库的 **34 个键 erase 后重写** | `src/ui/page/compiler.cpp:1647-1703`（`kThemeKeys[]`） | ⇒ 用户对**库 token** 的 `:root` 覆盖**会被清空** ⇒ **`--app-*` 前缀避让策略的依据成立** ✓ |
+| 3 | `RefreshThemeStyles` **只** `RebuildThemeVars` + 重新级联，**不重新采集 `:root`** | `src/ui/page/page_state.cpp:688-702` | ⇒ 切主题后 `--app-*` **仍是旧模式的值** ⇒ **「切主题必须重建页面」是必需的，不是可选的** ✓（D10 契约 3 的依据） |
 
 **规则 5 —— ★ 注入的键集里必须排除 `--app-accent`（D14 连带）**
 
@@ -293,22 +381,52 @@ if (IsRootSelector(sel)) continue;
 就会与系统色脱钩 → 又变成「自绘区蓝 + 库控件蓝」两种蓝。
 → Rust 拼 `:root` 时的键集 = `themes.json` 当前模式的**全部 `--app-*` 键，减去 `--app-accent`**。
 
+**规则 6 —— ★ `:root` 块内只允许 CSS 变量（不只是「建议」，要断言）**
+
+`:root` 规则在普通样式计算里被**整条跳过**（`cascade.cpp:125`）→
+里面的**普通声明（`background` / `color` / `font-family` …）会被静默丢弃**，
+而 `CollectRootVars` **只收 `--` 开头的声明**（`cascade.cpp:30-32`）→ **零诊断**。
+
+→ Rust 自检的**断言 3**（规则 3）负责拦它：`:root` 内出现非 `--app-*` 声明 → **fail-fast**。
+→ 根节点的 `background` / `color` / `font-family` 走 **`<div class="root">` 的 `.root` 规则**（§4.3.3 约束 3）。
+
 **★ 四口径速查（对外统一措辞：`spec/ffi-core-ui.md` §4.3.2.1 与 `spec/crate-layout.md` §4.3 逐字一致）**
 
 | # | 口径 | 一句话 |
 |---|---|---|
-| 1 | **拼进 `<style>` 块内** | `:root` 必须包在 `<style>` 里，裸放源码顶层 → 整页 load 失败。Rust 统一**在源码末尾追加一个完整的 `<style>` 块** |
-| 2 | **只允许 CSS 变量** | `:root` 里只写 `--app-*`；`background` / `color` / `font-family` 会被**静默丢弃**（`cascade.cpp:124-126`） |
+| 1 | **拼进 `<style>` 块内** | `:root` 必须包在 `<style>` 里，裸放源码顶层 → 整页 load 失败。Rust 统一**在源码最前面插入一个完整的 `<style>` 块** |
+| 2 | **只允许 CSS 变量** | `:root` 里只写 `--app-*`；`background` / `color` / `font-family` 会被**静默丢弃**（`cascade.cpp:125`）→ Rust 自检要**断言**它 |
 | 3 | **根样式走 `.root` class** | 根 `<div class="root">` + `.root { … }`；`window { … }` 匹配 0 个节点 |
-| 4 | **Rust 侧加载前自检** | 断言每个 `:root` 都落在某个 `<style>` 区间内 → 不满足**在 Rust 侧 fail-fast**，不许留给 core-ui 报 "SFC parse failed" |
+| 4 | **Rust 侧加载前自检** | **四条断言**：位置（`:root` 在 `<style>` 内）/ **顺序**（注入的是**第一个** `:root`）/ 内容（只含 `--app-*`）/ 键集（排除 `--app-accent`、不撞库 token）→ 任一不满足**在 Rust 侧 fail-fast** |
+| 5 | **注入必须是「第一个」`:root`** | ★ core-ui 的自定义属性是**先定义者赢**（`LookupVar` 返回**第一个**命中；`cascade.h:41` 注释 "Returns first set encountered"）→ **不是**「后者覆盖前者」；注入若排在 `.uix` 自己的 `:root` 之后 → **静默失效**（症状：切主题颜色不变） |
 
-> 口径 1 的**两种合法形态**：甲（**推荐**，Rust 实现走这个）= 末尾追加完整 `<style>` 块；
+> 口径 1 的**两种合法形态**：甲（**推荐**，Rust 实现走这个）= **在源码最前面插入**完整 `<style>` 块；
 > 乙 = 插进**已有** `<style>` 块内部（此时该块必须是**最后一个** `<style>` 块）。
 > 本项目三个 `.uix` 目前**各只有一个** `<style>` 块 → 乙也合法；
 > 但 Rust 实现**统一走甲**，不依赖「恰好一个」这个巧合。
 
+**★ 「加载后断言颜色」这件事能不能做？（诚实答案：API 层面做不了，只能靠像素）**
 
-### 4.3.3 ★ `.uix` 解析的三条硬约束（2026-11-13 源码级核对）
+前端建议「Rust 侧加载后断言颜色是否等于 `themes.json` 的值」——
+**方向对，但 core-ui 没有可读回 CSS 变量的 C API**：
+导出面里只有 `ui_widget_set_bg_color` / `ui_widget_set_text_color`（**写**），
+**没有** `get_style` / `get_var` / `computed` 之类（架构侧已扫 `docs/05-COREUI-EXPORTS.txt` 全表确认）；
+`ui_theme_bg()` 等只读的是**库 token**，读不到 `--app-*`。
+
+| 想验的东西 | 能不能验 | 怎么验 |
+|---|---|---|
+| `:root` 越界（裸放顶层） | ✅ 能 | **加载前自检**（口径 4）→ Rust 侧 fail-fast |
+| **压根没注入** | ⚠️ 只能间接 | 界面**能出来**但全是库默认色（`cascade.cpp:79-81`：`var()` 找不到 → 解析成空串 → `ParseColor("")` 失败）→ **静默**。唯一可靠的验法是**离屏渲染后取一个已知像素**与 `themes.json` 比对（一次性冒烟，**不进启动路径**） |
+| 注入晚于 load | ✅ 能 | 同上（顺序是 Rust 自己的代码路径，靠单测兜） |
+
+→ **契约落法**：
+1. **启动路径**只做**加载前自检**（口径 4）—— 它能挡住「越界」这个致命项；
+2. 「没注入」这个静默项 → 做成**离屏渲染冒烟**（`ui_offscreen_begin/end` → 画一块已知背景 → 取像素比对），
+   归 **M1 验收 V1.15**（一次性，不是每次启动）；
+3. **不要**为此在启动路径上加反射/读回 hack —— core-ui 不提供，就不要自己造轮子。
+
+
+### 4.3.3 ★ `.uix` 解析的**五条**硬约束（2026-11-13 源码级核对）
 
 > 需求来自前端在改 `.uix` 资产时发现的三处「资产写法与 core-ui 实际语义不符」。
 > **架构师已独立核对上游源码**（下面每条都带行号），结论与前端一致，
@@ -431,6 +549,99 @@ case SimpleKind::Pseudo: { uint32_t bit = PseudoToBit(ss.name); ... }
 > 「`window` 标签选择器匹配不到任何东西；必须显式给根 `<div>` 加 `class="root"` 再用 `.root` 选择器」**。
 > 写法上这两者结果一样，但**前者会让人以为 `window` 选择器有效**，将来 core-ui 若加了同名节点就会踩坑。
 
+#### 约束 4：★ `<separator>` **不画 CSS `background`** —— 要跟项目 token 同色就用 1px `<div>`
+
+```cpp
+// src/ui/controls.cpp:635-643
+void SeparatorWidget::OnDraw(Renderer& r) {
+    if (vertical_) { … r.DrawLine(cx, rect.top, cx, rect.bottom, theme::kDivider()); }
+    else           { … r.DrawLine(rect.left, cy, rect.right, cy, theme::kDivider()); }
+}
+```
+
+`SeparatorWidget::OnDraw` **不调用 `Widget::OnDraw`** → **CSS `background` 被完全忽略**；
+颜色写死 `theme::kDivider()`（**库 token** `--border` 家族），**不跟 `--app-divider`**。
+
+| 想达到的效果 | 写法 |
+|---|---|
+| 分隔线颜色 = **项目 token `--app-divider`** | **1px `<div class="sep"/>`** + `.sep { height: 1px; background: var(--app-divider); }` ✅ |
+| 分隔线颜色 = **库默认分隔线色**（随 `set_mode` 变） | `<separator/>` ✅（但**不跟**项目 token） |
+
+> **上游 demo 的事实**（架构侧已核对 `demo/ui_demo.uix`）：
+> 布局分隔线用 `<div class="sep"/>`（**19 处**，样式 `.sep { height: 1; background: var(--border-subtle); }`）；
+> 它那 **3 处 `<separator/>` 全部在 `<menu>` 内部**（菜单项之间的分隔线，用库色正好）。
+> → 所以「demo 里 `<separator>` 一次没用」这个说法**不准确**（是 3 次，但都在菜单里）；
+> **结论不变**：**布局里的分隔线要跟项目 token 同色 → 必须用 `<div class="sep"/>`。**
+>
+> ⚠️ 注意 demo 的 `.sep` 用的是**库 token** `var(--border-subtle)`；
+> 本项目要用 `var(--app-divider)`，否则分隔线**不随主题切换**（`--app-*` 不会自动变，见 D10 契约 3）。
+
+#### 约束 5：★ **不支持 `border-bottom`** → 选中态指示条只能 Rust 自绘
+
+core-ui 的 CSS 只认 **border / border-color / border-width / border-radius**
+（`widget_factory.cpp:635-653` 读取的就是这四个）；
+`src/ui/css/` 与 `widget_factory.cpp` **全仓 grep `border-bottom` = 零命中** → **不区分边框方向**。
+
+| 想做 | 能不能用 CSS | 怎么做 |
+|---|---|---|
+| 选中标签下方 2px 强调色条 | ❌ 不能用 `border-bottom` | **Rust 在 `<custom>` 的 draw 回调里画**（`ui_draw_rect`，坐标自己算） |
+| 固定位置的分隔线 | ✅ | 1px `<div class="divider"/>` + `background`（约束 4） |
+
+> **为什么必须 Rust 画，而不是「2px 高的 `<div>`」**：`.uix` 是**静态布局**，
+> 且 **core-ui 没有运行时设置 class 的 C API** → 「哪个标签被选中」无法靠切 class 表达
+> → 指示条必须由 Rust 按当前状态**现画**。
+> （这与「标签条 / 命令栏由 Rust 自绘」是同一条理由，见 `assets/main.uix` 头部注释的「Rust 自绘参照规范」。）
+
+### 4.3.4 ★ 自绘宿主的**判定规则**与三个宿主的裁定（2026-11-13）
+
+> 触发：前端把 `list_host` 改成 `<custom>` 后问 —— 另外三个 Rust 侧宿主
+> （`nav_host` / `breadcrumb` / `preview_host`）要不要一起改？
+> **架构侧裁定如下（一条规则 + 三个结论），前端可照此直接改资产。**
+
+#### 判定规则（一条就够，别按「像不像」拍）
+
+> **这块矩形的内容，是不是 Rust 用绘制指令画出来的？**
+>
+> - **是** → 用 **`<custom>`**（Rust 自绘画布；工厂保证 CSS 宽高生效）
+> - **否，是 core-ui 控件或文本投影** → 用 **`<div>` / `<label>`**
+> - **混合（既要 Rust 画图，又要有 core-ui 控件）** → 拆成「**`<div>` 容器 + 里面的 `<custom>` 子宿主**」
+
+**为什么规则里没有「API 好不好用」**：运行时 `ui_custom()` 也能挂回调，但**它不经过 `ApplyCommonStyle`**
+（该函数全仓只有 `compiler.cpp:920` 与 `widget_factory.cpp:1363` 两个调用点）→ **没有 CSS** →
+在 flex 容器里**尺寸为 0**。这是**布局问题**，不是风格问题。
+
+#### 三个宿主的裁定
+
+| id | 现状 | 内容从哪来 | **裁定** |
+|---|---|---|---|
+| `nav_host` | `<custom id="nav_host" class="nav-host" />` ✅ **已落** | **Rust 自绘导航树**（D07：`IShellItem` 枚举 + 自绘） | ✅ **改成 `<custom>`** —— **不是「为了统一」**：`<div>` 上 `ui_custom_on_draw` 是**静默 no-op**（`As<ui::CustomWidget>` 取不到）→ **树根本画不出来** |
+| `breadcrumb` | `<label id="breadcrumb" class="breadcrumb" />` ✅ **已落** | **文本投影**（Rust 状态 → 一行路径文字） | ⛔ **不改 `<custom>`**（文字不是自绘画布）→ **但要改形态**：**空 div 显示不出任何东西** → `<label>` + Rust `ui_label_set_text(w, L"…")`（UTF-16） |
+| `preview_host` | `<div id="preview_host" class="preview-host">` ✅ **已落** | **混合**：图片（位图）+ 元信息（文本） | ✅ **保持 `<div>` 当容器**，里面放 **`<custom id="preview_image" class="preview-image"/>`**（Rust 画图）+ **4 个 `<label class="preview-meta">`**（`preview_host_name` / `_size` / `_channel` / `_state`）。**不要**把 core-ui 的 `ui_image_view()` 当子控件塞进去 |
+| `preview_body`（`preview.uix` 内） | `<custom id="preview_body" class="preview-body" />` ✅ **已落** | 图片位（Rust blit，D06-1） | ✅ **`<custom>`** —— 与 `preview_image` 同一角色 |
+
+#### 为什么预览不用 `ui_image_view()` 当子控件（三条理由）
+
+1. **运行时创建的控件没有 CSS** → 尺寸只能靠 `ui_widget_set_size` **手算 px**；
+   且它作为**运行时插入的子控件**如何参与父容器布局，core-ui **没有公开承诺**
+   （`ui_widget_add_child` 会触发重排，但子控件没有 CSS flex 属性）→ **风险不可控**。
+2. **声明式 `<img>` 也不行**：它的 `src` 是**资产 key**（由 `ui_asset_register_dir/_blob/_resolver` 解析），
+   **没有运行时改 `src` 的 API** → 不能随选中项变化。
+3. **`<custom>` + 位图是导出表里现成的路径**：
+   `ui_bitmap_create(pixels, w, h, stride)` → `ui_draw_bitmap_handle(ctx, bitmap, x, y, w, h)`
+   （回调签名 `UiCustomDrawCallback(UiWidget, UiDrawCtx, UiRect, void*)` **带 draw ctx**，
+   头文件在该段注释里就写着「Drawing API (use inside UiCustomDrawCallback)」）→ 缩放由 Rust 自己算 fit。
+
+> **像素管线不变**：仍是 **WIC 解码 → BGRA 预乘 → `ui_bitmap_create`**（`ui_draw_bitmap` 的像素格式要求
+> 与 `ui_image_set_pixels` 相同：**BGRA 预乘**）→ **§7.1 的像素格式章节继续有效**。
+> → **D06 的实质不变**（「图片留在程序内、WIC 解码、不依赖 `ghde.dll`」）；
+> 变的只是**承载方式**：从「core-ui 的 `ui_image_view` 控件」改为「Rust 在 `<custom>` 里 blit」→ 记为 **D06-1**（机制细化）。
+
+> **代价（必须承认）**：图片的**缩放 / 平移 / 滚动要自己实现**（首版只要 fit）。
+> M3+ 若要交互式缩放 → 走「`<custom>` 内 `ui_widget_add_child` + `ui_widget_set_size` **显式定位**」
+> 或 `ui_image_gdi_*` 族（这 9 个符号**可绑定**，见 §5.3）。
+
+> **静态布局的约束**：`.uix` 是**静态布局**（D-15）→ 预览面板的行数**固定**（M2-5 的元信息是固定的 4~5 项）
+> → 那些 `<label>` 行**在 `.uix` 里预先声明**即可，Rust 只负责推文本。
 
 ### 4.4 完整数据流
 
@@ -473,7 +684,7 @@ case SimpleKind::Pseudo: { uint32_t bit = PseudoToBit(ss.name); ... }
 └──────────────┘ └──────────────────┘  └──────────────────────────────┘
 ```
 
-### 4.5 三个必须说清的问题
+### 4.5 六个必须说清的问题
 
 **Q1：谁发事件？**
 core-ui 发。core-ui 把事件派发成**我们注册的 C 函数指针**。
@@ -512,6 +723,83 @@ Rust。Rust 状态机改完后自己 diff（上游 zsdesk 已有这套 MVU 骨�
 | 事件回调里调 `ui_menu_show` | 安全，但**会立即弹出菜单**；`.uix` 的 `<menu trigger>` 路径会自动处理锚点，优先用后者 |
 | 事件回调里调 `DoDragDrop`（OLE 拖出） | core-ui **明确支持** —— `src/ui/ui_window.cpp` 注释：<br>「hook 可能跑模态循环（宿主在 @mousemove 里起 OLE DoDragDrop 拖出）：DoDragDrop 内部 SetCapture 夺走 capture → WM_CAPTURECHANGED 同步派发 → CancelMouseCapture() 清空 pressedWidget_。返回后必须重查」 |
 | 事件回调里调 `ui_msgbox`（模态） | 安全（core-ui 支持模态），但模态期间 UI 线程被占，工作线程的 `invoke_sync` 会排队 |
+
+---
+
+### 4.6 ★ 页面重建的生命周期契约（切主题 / 换 accent 后重载页面）
+
+> **触发场景**：切深浅色（D10 契约 3）、换 accent（D14）、换 `:root` 里的任何 `--app-*` 值。
+> 三者都**必须**重建页面 —— 库**没有**运行时改 CSS 变量的 API。
+
+#### 4.6.1 为什么必须重建（不能只 `ui_page_reload`）
+
+| 事实 | 依据 |
+|---|---|
+| `ui_page_load_string` 返回**全新**的 page；旧 page 的控件被销毁 | `page_api.cpp`：`ui_page_load_string` → `Registry().Insert(std::make_unique<PageEntry>())` |
+| `ui_page_reload(p)` **重放旧源码** → palette 改不了 | `page_api.cpp:565-577`：`e->sourcePath` 为空时 `CompileAndAttachPage(*e, e->sourceText)` —— 用的是**旧的 sourceText** |
+| `ui_page_reload` **同样重新编译** → 句柄**同样失效** | 它走的是同一个 `CompileAndAttachPage` |
+
+→ **结论**：`ui_page_reload` **帮不上忙**，还会让你误以为句柄还是有效的。
+
+#### 4.6.2 重建的三步（缺一不可，顺序固定）
+
+```
+1. ui_page_destroy(旧 page)            // 不销毁 → 泄漏；且旧控件仍占着资源
+2. ui_page_load_string(新源码)          // 得到新 page（新的 page 句柄本身也变了）
+3. 重新 ui_widget_find_by_id(新 page, id) 取回全部句柄
+   + 在新 page 上重新 ui_page_on_widget_mount(新 page, id, cb, ud) 注册挂载钩子
+   → 重新投影状态 / 重挂自绘状态
+```
+
+> ★ **第 3 步的「重新注册挂载钩子」不能省**（**这是架构侧自查后修正的措辞**）：
+> `ui_page_on_widget_mount` 的钩子挂在**具体 page** 上
+> （`page_api.cpp:850-854` → `e->state->OnWidgetMount` → 存进该 `PageState` 的 `lifecycleHooks_`）。
+> **同一个 page 内**的晚出现控件（v-if / v-for 重建）会自动补发 ✅；
+> 但**新 page 是全新的 `PageState`，钩子表是空的** → **不会自动转移** ❌。
+> → 必须在**新 page 上重新注册**；因为 `PageState::OnWidgetMount` 带 **catch-up**
+> （`page_state.cpp:635-652`：注册时若树上已有同 id 控件**立刻调一次**）→
+> **注册即触发**，不必等下一次挂载，也不需要额外的「等一轮」的同步逻辑。
+
+#### 4.6.3 ★ 句柄清单（本项目实测：**32 个**，2026-11-13 资产更新后重数）
+
+| 页面 | distinct `id` 数 | 备注 |
+|---|---:|---|
+| `assets/main.uix` | **26** | 其中 **3 个 `<custom>` 自绘宿主**：`nav_host`（导航树）/ `list_host`（文件列表）/ `preview_image`（预览图片位）；另有 `preview_host` 容器内的 4 个 `<label class="preview-meta">`：`preview_host_name` / `_size` / `_channel` / `_state` |
+| `assets/preview.uix` | **6** | `preview_title` / `preview_body`（**`<custom>`**，图片位）/ `preview_hint` / `preview_channel` / `preview_size` / `preview_state` |
+| `assets/about.uix` | **0** | 无 id |
+| **合计** | **32** | 架构侧按「剥注释后正则计数」实测复核（`main.uix` 26 + `preview.uix` 6） |
+
+> **数字为什么必须写进契约**：它是「重建后漏取句柄」这个 bug 的**判据**。
+> 漏取一个 → 那个位置的更新**静默失效**（不报错、不崩，只是不动）。
+> ⚠️ **这个数字随资产变** → 资产增删 id 时**必须同步本表**（否则判据失效）。
+> → 建议 Rust 侧**不要**硬编码 32，而是**遍历**取句柄 + 断言「期望 id 集合 == 实际 id 集合」
+> （Rust 侧维护一份期望清单，资产改动时由**门禁**比对，而不是靠人记得改文档）。
+
+> **为什么这个数字必须写进契约**：它是「重建后漏取句柄」这个 bug 的**判据**。
+> 漏取一个 → 那个位置的更新**静默失效**（不报错、不崩，只是不动）。
+
+#### 4.6.4 「自动回填」只覆盖**同一个 page 内**（**别被 §4.3.1 误导**）
+
+| 场景 | 钩子会不会自动补发 | 依据 |
+|---|---|---|
+| **同一个 page 内**，控件后来才出现（v-if / v-for 重建） | ✅ **会**（且注册时若控件已存在会**立刻调一次** = catch-up） | `page_state.cpp:635-652` |
+| **切主题重建出新 page** | ❌ **不会** —— 新 `PageState` 的钩子表是空的 | `page_api.cpp:850-854` |
+
+→ Rust 必须**主动重取全部 32 个句柄** + **在新 page 上重新注册钩子**；
+旧句柄指向已销毁的控件 → **写野内存** → 表现是「静默崩溃 / 花屏」，**不会报「句柄无效」**。
+
+#### 4.6.5 故障判据（切主题后按这个顺序查）
+
+| 现象 | 第一嫌疑 |
+|---|---|
+| 状态栏不更新（`status_item_count` / `status_selected` / `status_text`） | 旧句柄没重取 |
+| 列表空白 | `list_host` 句柄没重取，或绘制回调没回填 |
+| 预览不刷新 | `preview_host` 句柄没重取 |
+| 面包屑不更新 | `breadcrumb` 句柄没重取（`<label>`，Rust `ui_label_set_text`） |
+| 预览不刷新 / 元信息空白 | `preview_image` 或 `preview_host_*` 句柄没重取 |
+| 切主题后**颜色没变** | 忘了 `set_mode` + 重建（只调了 `set_mode` 没重建页面 → `--app-*` 不变，见 D10 契约 3） |
+
+→ **M1 验收 V1.13**：切一次主题 → **状态栏 / 列表 / 预览 / 面包屑四处的「动」都正常**。
 
 ---
 
@@ -606,6 +894,7 @@ CI 从**仓库 main** 编译 core-ui（D03）。按 PM 的源码扫描，pinned 
 | **写什么** | `packaging/core-ui-revision.txt` 的内容去首尾空白后，原样写入 + **一个换行**；**无 BOM**。**只有一行**（40 位十六进制 SHA）—— **版本号不写进戳记**（DLL 版本由版本资源承担，见 Gate G2） |
 | **写到哪** | **与最终 exe 同目录** → `target/<profile>/core-ui.dll.revision`（`OUT_DIR` 往回 3 层） |
 | **CI 做什么** | **只校验**：打包后断言「包内 `core-ui.dll.revision` 的内容（trim）== `packaging/core-ui-revision.txt` 的内容（trim）」；不等即**打包失败** |
+| **分期（★ D16）** | **M0 过渡**：由 **CI 代写**戳记（Rust 绑定层尚未落地），但 CI **必须机器断言**「包内戳记 == `packaging/core-ui-revision.txt`」，不过即 fail；**M1 落地**：改为 Rust `build.rs` 编译期写，CI **只校验、不再代写** |
 | **⚠️ 前置条件** | CI 的构建必须**真的编到 `zsdesk-coreui` 这个 crate**（`zsdesk-app` 依赖它，或 CI 额外跑一次 `cargo build -p zsdesk-coreui`）—— 否则 build.rs 不跑 → `target/release/core-ui.dll.revision` 不存在 → 打包断言失败（这是**预期行为**：失败即停） |
 
 **CI 断言（PowerShell，可直接贴进 `build.yml`）**：
@@ -721,12 +1010,17 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 
 #### 契约 1：Rust 必须在 `ui_page_load_string` 之前注入 `:root` 块
 
-读 `assets/themes.json` → 拼 `":root { --app-bg: #F3F3F3; … }"` → 拼进 `.uix` 源码 →
-`ui_page_load_string`。
+读 `assets/themes.json` → 拼 `":root { --app-bg: #F3F3F3; … }"` → **拼进 `.uix` 源码最前面的
+一个完整 `<style>` 块** → `ui_page_load_string`。
 → 页面用 **`ui_page_load_string`** 加载（§4.3.2）；`.uix` 与 `themes.json` **必须以文件形式进包**。
 
-> **顺序是硬要求**：注入必须**早于** load。晚一步 → 自定义属性不存在 →
-> `var(--app-bg)` 解析失败 → **静默回落到库默认色**，界面白得像「能跑」但配色全错。
+> **两条顺序都是硬要求**：
+> 1. **注入必须早于 load** —— 晚一步 → 自定义属性不存在 → `var(--app-bg)` 解析失败 →
+>    **静默回落到库默认色**，界面白得像「能跑」但配色全错；
+> 2. **注入必须是源码里「第一个」`:root`** —— core-ui 的自定义属性是**先定义者赢**
+>    （`LookupVar` 返回**第一个**命中，`cascade.h:41` 注释 "Returns first set encountered"）
+>    → 注入若排在 `.uix` 自己的 `:root` 之后 → **`.uix` 的值赢** → Rust 的注入被**静默忽略**
+>    → 症状是「切主题颜色不变」，**没有任何报错**（§4.3.2.1 规则 4）。
 
 #### 契约 2：Rust 初始化时的调用顺序与各自的影响范围（**D14 生效版**）
 
@@ -795,9 +1089,11 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 
 1. 明暗切换时，**库自绘控件跟随库 palette 变，本项目自绘区域（`--app-*`）不会自动跟随** ——
    必须重建页面才变。这是改名避让路线的固有代价，已被接受；
-2. **重建页面 = 重建控件树** → 自绘控件要重新取句柄并重挂回调（§4.3.1 的
-   `ui_page_on_widget_mount` 按 id 持久化，**会自动回填** → 比运行时挂载省一层状态管理）；
-   重建期间有一次闪烁（M1/M2 要量一下）；
+2. **重建页面 = 重建控件树** → **Rust 自己持有的 32 个 `ui_widget_find_by_id` 句柄全部失效，必须全部重取**
+   （`main.uix` 26 + `preview.uix` 6；旧句柄继续用 = 写野内存 → 静默崩溃/花屏）。
+   **挂载钩子也不会自动转移**（`ui_page_on_widget_mount` 的钩子挂在**具体 page** 上）→
+   必须在**新 page 上重新注册**（catch-up 保证「注册即触发」）。
+   → **三步协议与故障判据见 §4.6**。重建期间有一次闪烁（M1/M2 要量一下）；
 3. 门禁 **S13**（最终表述见下）。
 
 #### 门禁 S13 · 最终表述
@@ -872,12 +1168,15 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 
 | 职责 | crate / 模块 | 说明 |
 |---|---|---|
-| **读注册表** | `crates/zsdesk-windows/src/system/accent.rs`（**新增**） | 平台相关读法归平台 crate；返回 `Option<SystemAccent>`，**不认识 core-ui**、不认识 FFI |
-| **决定值 + 调库** | `crates/zsdesk-app/src/theme.rs`（**改造上游同名文件**） | 组装根：`zsdesk-app` 是 composition root，同时依赖 `zsdesk-windows` 与 `zsdesk-coreui` |
+| **读注册表** | `crates/zsdesk-windows/src/theme.rs`（**改造**：加 `read_system_accent()`；与该文件已有的 DWM backdrop / 圆角偏好同处） | 平台相关读法归**平台 crate**；返回 `Option<SystemAccent>`，**不认识 core-ui**、不认识 FFI |
+| **决定值 + 调库** | `crates/zsdesk-ui/src/theme.rs`（**改造上游同名文件**） | chrome 层：上游 `theme.rs` / `chrome.rs` / `menus.rs` 就在这一层；`zsdesk-ui` 依赖 `zsdesk-windows` 与 `zsdesk-coreui` |
 | **调 core-ui** | `crates/zsdesk-coreui/`（`ui_theme_set_accent_hex` 的绑定） | FFI crate **不依赖** `zsdesk-windows`（否则会把平台 crate 拖进 FFI 层，违反 §2.3 的分层） |
+| **页面装配 / 句柄表** | `crates/zsdesk-ui/src/shell_page.rs` | chrome 层；`zsdesk-coreui` 的 README 也写明「页面装配在 `zsdesk-ui`」 |
 
-> **依赖方向**：`zsdesk-app → { zsdesk-windows, zsdesk-coreui }`，`zsdesk-coreui ↛ zsdesk-windows`。
-> → 与 `spec/crate-layout.md` §2.2 的三条规则一致，不新增环。
+> **依赖方向**：`zsdesk-ui → { zsdesk-windows, zsdesk-coreui }`，`zsdesk-app → { zsdesk-ui, zsdesk-windows, zsdesk-coreui }`，
+> `zsdesk-coreui ↛ zsdesk-windows`（FFI 层不依赖平台层）。
+> → 新增的两条边**无环**：`zsdesk-windows` 只依赖 `zsdesk-core` / `zsdesk-platform` / `windows-sys`，回不到 `zsdesk-ui`。
+> → 与 `spec/crate-layout.md` §2.2 的三条规则一致。
 
 #### 启动日志（**M1 验收项 V1.11 的判据**）
 
@@ -1074,7 +1373,7 @@ WIC 会在 `CopyPixels` 时直接做预乘 → **零额外转换**，像素可�
    由 widget-local 坐标算出**命中的行号**，存进 `pending_ctx_row`。
 2. Rust 把该行的上下文（选中项、是否多选、是否可粘贴、是否在回收站…）
    组装成 JSON，`ui_page_set_json(page, "ctxCommands", json)`。
-3. `.uix` 的 `<menu trigger="#file_list" event="rclick">` 弹出 ——
+3. `.uix` 的 `<menu trigger="#list_host" event="rclick">` 弹出 ——
    core-ui 的 rclick 是 **deepest-match**（build 107-108），子 widget 的菜单
    不会被祖先抢走。
 4. 用户点菜单项 → core-ui 调 `ui_window_on_menu(win, cb, ud)` →
@@ -1097,7 +1396,7 @@ WIC 会在 `CopyPixels` 时直接做预乘 → **零额外转换**，像素可�
 | Rust → `.uix` | `ui_page_set_text/int/bool/float` | 单值 | 状态变更时 | 标量优先 |
 | `.uix` → Rust | `ui_page_watch(page, name, cb, ud)` | JSON（**仅回调期间有效**） | JS 改了响应式变量时 | 只 watch **小**变量；禁止 watch 文件列表 |
 | `.uix` → Rust | `ui_widget_on_click(w, cb, ud)` 等 | 控件句柄 | 交互时 | **优先于 `ui_page_watch`**：直连 Rust，不过 JS |
-| `.uix` → Rust | `ui_page_on_widget_mount(page, id, cb, ud)` | 控件句柄 | mount 时 | 用来给 `<custom id="file_list"/>` 挂 draw / 鼠标回调 |
+| `.uix` → Rust | `ui_page_on_widget_mount(page, id, cb, ud)` | 控件句柄 | mount 时 | 用来给 `<custom id="list_host"/>` 挂 draw / 鼠标回调 |
 | Rust → core-ui | `ui_window_invalidate(win)` | — | 需要重绘时 | draw 回调里**禁止**调用 |
 
 **名称约定**：`.uix` 的响应式变量名用 `camelCase`，与 Rust 字段一一对应。
@@ -1130,6 +1429,12 @@ Rust 侧用一个 `ViewModel` 结构统一投影，**不散落各处的 `set_*` 
 5. **不实现** 虚拟列表的**分组**（`ViewGrouping` 在 `zsdesk-core` 里有，但 UI 侧首版只按排序）。
 6. **不承诺** 本机 GuoheView 目录里的 `core-ui.dll` 与 CI 构建的版本一致 ——
    那是**兜底**，不是分发渠道。
+7. **不实现**系统高对比度接管、读屏 / Narrator、Mica / Acrylic 材质（D13）——
+   core-ui **没有** UIA 桥接、**不读**系统色、**没有**材质入口
+   （`GetSysColor`/`UISettings`/`AccentColor`/`uia`/`accessibility`/`mica`/`acrylic` 全仓零命中）。
+   已知限制清单见 `spec/milestones.md` §8；本契约不提供任何补偿实现。
+8. **不替 core-ui 读系统强调色**（D14）—— 「跟随系统 `AccentColor`」是 **Rust 侧**的职责
+   （§5.6.2），core-ui 只提供写入口 `ui_theme_set_accent_hex`。
 
 ---
 
@@ -1142,15 +1447,24 @@ cargo build --release --p zsdesk-app
 
 # 2. 启动自检：版本 + 能力 + revision 戳记
 #    期望：日志出现 "core-ui 1.9.0.345 | <exe目录>\core-ui.dll | revision 一致"
-#    能力行必须包含 image_gdi=false（CI 构建的是仓库 main，没有那 12 个符号）
+#    能力行必须包含 image_gdi=true（CI 产物**有**那 12 个符号 —— D08 放宽后已核实：
+#    pinned revision 全 src/ 扫出 567 个 ui_*，与本机 DLL 双向差集为空）
+#    还要有 "accent=#RRGGBB source=system|fallback|default"（D14）
 
 # 3. 离屏渲染冒烟（不需要桌面会话）
 #    ui_offscreen_begin/end 画一个矩形 → 断言像素非全零
+#    ★ 再画一块「根容器背景」→ 取像素 == themes.json 的 --app-bg
+#      （core-ui 无读回 CSS 变量的 API → 「压根没注入」只能靠像素验；M1 验收 V1.15）
 
 # 4. 交互闭环（CI runner 无交互桌面 → 走 core-ui 的调试管道）
 #    ui_debug_server_start(win, "zsdesk_coreui_ci")
 #    PowerShell: 写入 \\.\pipe\zsdesk_coreui_ci → "click <id>" / "screenshot <path>"
 #    断言：截图非空，且文件列表区域有内容
+
+# 5. 页面重建冒烟（§4.6）
+#    切一次主题 → destroy → load_string → 重取 32 个句柄 → 重挂回调
+#    断言：状态栏 / 列表 / 预览 / 面包屑**四处都刷新**（M1 验收 V1.13）
+#    ★ 漏取句柄的表现是「静默不动 / 野指针」，不是报错 → 必须四处都验
 ```
 
 **关键错误流**：把 `core-ui.dll` 移走再启动 → 必须在启动时**大声失败**并给出

@@ -104,8 +104,8 @@ job package  needs: [rust, core-ui]
 | 17 | **G2b 戳记**：戳记内容 == pinned revision（`packaging/core-ui-revision.txt`） | **产出方已定 = Rust 侧**（`crates/zsdesk-coreui/build.rs`，口径甲）→ CI **只校验**；**CI 现在还在自己写一份**（Gate G2 里 `Set-Content`，写到 `clang-cl-build/`，两行）→ **删掉它** | 🟡 **断言待加**（§4.2 / §4.6b） |
 | 18 | **S7 CRT 动态性**：导入表必须含 `MSVCP140.dll` + `VCRUNTIME140.dll` | `Gate S7 — core-ui.dll must link the dynamic VC++ runtime`（dumpbin 判定） | ✅ |
 | 19 | **S12 同目录**：`core-ui.dll` 与 exe 同目录 | `Gate S12` | ✅ |
-| 20 | **S7'-第一段**：CI 编出的 DLL 的 `ui_*` 导出集 vs `docs/05-COREUI-EXPORTS.txt`（567 个）；**判据按实测符号集**（PM 扫 pinned revision 全 `src/` 的 `UI_API` → 567，与本机 DLL 双向差集为空，仅 `ui_dialog` 例外）→ 断言「CI 产物的 `ui_*` 集 ⊇ 本机 567（允许 `ui_dialog` 缺）」且「差集 ⊆ {`ui_core_embed_binary`}」 | 未实现 | 🟡 **建议本版就加**（不需要绑定层落地） |
-| 21 | **S7'-第二段 / S8 绑定面**：绑定层**必需符号集** ⊆ S7' 实测导出集；必需 ∩ 可选 = ∅；可选里的 12 个「头文件漏声明」符号签名必须与 `src/ui/ui_api.cpp` 一致 | 未实现 | ⏳ **M1 加**（需绑定层先落地） |
+| 20 | **S7' 导出面门禁**：CI 编出的 DLL 的 `ui_*` 导出集 vs **同一 checkout 里 `src/` 的 `UI_API` 定义集**（★ **基准按 D19 定**：`docs/05-COREUI-EXPORTS.txt` 记的是**本机 1.9.0.346** 的实测面，与 CI 编的 **345** 跨版本 → 只能得到「版本漂移」而非真缺陷；**也不用头文件**（上游 `include/ui_core.h` **漏声明 12 个符号** → 会把它们误判成 unexpected）；`ui_dialog` 头文件有、源码无 → **容忍并报告**，不静默放宽） | ✅ **脚本已落地**：`scripts/gates/coreui_export_gate.py`（+ `pe_exports.py` 解析器，无外部依赖；解析器已用本机 `GuoheView\core-ui.dll` 实测**逐字节复现** docs/05 的 567 基线，正例/反例均正确） | ✅ **已接进 `build.yml`**：S13 五个门禁在 `rust` job 的「Gate S13」步骤；S7' 在 `core-ui` job 的「Gate S7'」步骤（🟡 **尚未经真实 CI 验证**） |
+| 21 | **S8 绑定面**：绑定层**必需符号集** ⊆ S7' 实测导出集；必需 ∩ 可选 = ∅；可选里的 12 个「头文件漏声明」符号签名必须与 `src/ui/ui_api.cpp` 一致 | 未实现（`scripts/check-coreui-api.py` 仍不存在） | ⏳ **M1 加**（需绑定层先落地） |
 
 ### 3.4 打包
 
@@ -122,12 +122,16 @@ job package  needs: [rust, core-ui]
 
 | # | 目标态 | 当前态 | 判定 |
 |---|---|---|---|
-| 28 | **S9 crate 依赖无环** | `scripts/gates/check_crate_dag.py` —— **脚本不存在**，CI 未调用 | ⛔ 见 §5.5 |
+| 28 | **S9 crate 依赖无环** | `scripts/gates/check_crate_dag.py` —— **脚本不存在**，CI 未调用 | ⛔ 见 §4.8 |
 | 29 | **S10 FFI 层无业务依赖** | 同上 | ⛔ |
-| 30 | **G01/G03/G04/G08 + 工程门禁 P0** | `scripts/gates/verify.py` / `gates_engineering.py` —— **脚本不存在**，CI 未调用 | ⛔ 见 §5.5 |
-| 31 | **S13 token 不撞名**（禁止自定义库 token 名，见 `spec/ffi-core-ui.md` §5.6.1） | 未实现 | ⛔ 见 §5.5 |
+| 30 | **G01/G03/G04/G08 + 工程门禁 P0** | `scripts/gates/verify.py` / `gates_engineering.py` —— **脚本不存在**，CI 未调用 | ⛔ 见 §4.8 |
+| 31 | **S13 token 不撞名**（禁止自定义库 token 名，见 `spec/ffi-core-ui.md` §5.6.1） | ✅ **脚本已落地**：`scripts/gates/s13_token_namespace_check.py --root .`（逐字口径实现 + 负控已证：注入 6 类缺陷 ⇒ EXIT=1，逐条带 `文件:行`）；⭐ **但 CI 仍未调用** | ✅ **已接进 `build.yml`**：S13 五个门禁在 `rust` job 的「Gate S13」步骤；S7' 在 `core-ui` job 的「Gate S7'」步骤（🟡 **尚未经真实 CI 验证**） |
+| 31b | ★ **id 清单 == 实际 id 集合**（防止资产加 id 后 Rust 漏取句柄 → 静默不刷新；并查同页重 id） | ✅ **脚本已落地**：`scripts/gates/ui_id_manifest_check.py --root .`（期望集在 `assets/ui-ids.json`；实测「共 32 个唯一 id，3 页」EXIT=0） | ✅ **已接进 `build.yml`**：S13 五个门禁在 `rust` job 的「Gate S13」步骤；S7' 在 `core-ui` job 的「Gate S7'」步骤（🟡 **尚未经真实 CI 验证**） |
+| 31c | **S7' 导出面**（CI 编出的 DLL vs 上游 `UI_API` 源码面） | ✅ **脚本已落地**：`scripts/gates/coreui_export_gate.py --dll <dll> --source-dir <core-ui/src> --include-dir <core-ui/include>`（+ 辅助 `pe_exports.py`） | ✅ **已接进 `build.yml`**：S13 五个门禁在 `rust` job 的「Gate S13」步骤；S7' 在 `core-ui` job 的「Gate S7'」步骤（🟡 **尚未经真实 CI 验证**） |
+| 31d | 资产质量门（G05 对比度 / G13 间距 / 标签 / D-15 / SFC 骨架） | ✅ **脚本已落地**：`scripts/gates/qa_uix_verify.py`、`theme_contrast_check.py`、`uix_tag_check.py`（各自 `--root .`） | ✅ **已接进 `build.yml`**：S13 五个门禁在 `rust` job 的「Gate S13」步骤；S7' 在 `core-ui` job 的「Gate S7'」步骤（🟡 **尚未经真实 CI 验证**） |
 | 32 | **G7 错误流**：移走 `core-ui.dll` → 启动 → 非零码退出 + 打印候选路径列表 | 未实现 | ⛔ 见 §5.6（M0 之后） |
 | 33 | **G10 `zsui` 收口门禁**（M3：workspace 不再有 zsui path 依赖、CI 不再 checkout zsui） | 未实现 | ⏳ M3 |
+| 34 | ★ **凡跑 cargo 的 job 都必须具备 workspace 的全部 path 依赖**：`zsui` 与 `app/` **同级**（`crates/zsdesk-{app,ui}/Cargo.toml` 里是 `path = "../../../zsui"`）→ 凡以 `app/` 为工作目录的 job 都要检出 `zsui/` | `rust` job ✅ 有（读 pin + `actions/checkout` → `path: zsui`）；**`package` job ❌ 只 checkout 了 `app`**（`build.yml` 第 344 行） | ⛔ **P0**（见 §4.7） |
 
 ---
 
@@ -158,10 +162,11 @@ job package  needs: [rust, core-ui]
 |---|---|
 | **谁写** | **Rust 侧** `crates/zsdesk-coreui/build.rs`；CI **不写** |
 | **何时** | build.rs 运行时（每次 `cargo build` / `cargo test`）→ 与 exe 天然同版本 |
-| **写什么** | revision SHA（40 位 hex）+ **一个 `\n`**；**无 BOM**；**只有一行**（版本号不进戳记） |
+| **写什么** | revision SHA（40 位 hex）+ **一个 `\n`**；**无 BOM**；**只有一行**（★ **D16：单行 SHA，不带 VERSION、不带第二行** —— 权威口径见 `spec/ffi-core-ui.md` §5.5；版本号不进戳记） |
 | **写到哪** | `target/<profile>/core-ui.dll.revision`（**与 exe 同目录**）→ CI 打包拷的就是这个路径 |
 | **CI 做什么** | **只校验**：包内戳记（trim）== `packaging/core-ui-revision.txt`（trim）；不等 → **打包失败** |
 | **CI 要删的一步** | 现 Gate G2 里 `Set-Content ... "$expected`n<revision>"`（写 `core-ui/clang-cl-build/core-ui.dll.revision`，**两行**）→ **删掉**。两个来源 = 比对失去意义；且它不在 exe 同目录 |
+| **分期（★ D16）** | **M0 过渡**：由 **CI 代写**戳记（Rust 绑定层尚未落地），但 CI **必须机器断言**「包内戳记 == `packaging/core-ui-revision.txt`」，不过即 fail；**M1 落地**：改为 Rust `build.rs` 编译期写，CI **只校验、不再代写** |
 
 **为什么是 Rust 产出**：编译期常量 `EXPECTED_REVISION` 是**唯一权威来源**。
 若戳记由 CI 写，两者可能来自不同来源 → 比对失去意义。
@@ -269,6 +274,89 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 
 > **验收项**：`spec/milestones.md` **V3-13**（M3 收口时人工 + 打包内容检查）。
 
+### 4.7 ✅ **已修**（2026-11-13）：`package` job 补上 `zsui/` 检出 —— 原 P0：`package` job 缺 `zsui/` → cargo 装载 workspace 失败（运维 2026-11-13 报，架构侧已独立复核）
+
+**事实**（架构侧已核对 `build.yml` 与各 crate 的 `Cargo.toml`）：
+
+| job | 检出 | 跑 cargo？ |
+|---|---|---|
+| `rust` | `app/`（第 30 行）+ `zsui/`（第 40–44 行：读 `app/packaging/zsui-revision.txt` → `actions/checkout` → `path: zsui`） | ✅ |
+| `core-ui` | `app/` + core-ui 源码 | ❌（不跑 cargo） |
+| **`package`** | **只有 `app/`（第 344 行）** | ✅（冒烟探针第 404 行 + 戳记断言第 426 行） |
+
+**为什么致命**：workspace 成员 `crates/zsdesk-app`、`crates/zsdesk-ui` 都有
+`zsui = { path = "../../../zsui" }` → 从 `app/crates/<name>/` 解析 = **`<workspace>/../zsui`** →
+而 `package` job **没检出它** → cargo 装载 workspace 清单时**必然**失败：
+`failed to load manifest for workspace member …/zsdesk-app`。
+
+**会连炸两处，且第二处会误导人**：
+1. 冒烟探针 `cargo build --release --locked -p zsdesk-coreui --example probe`（第 404 行）→ 失败；
+2. 戳记断言（第 426–430 行）报 **`core-ui.dll.revision missing … build.rs did not run`**
+   → ★ **把人引向「build.rs 没跑」**，而真正原因是「`zsui` 没检出」。
+   （这类「错误信息指向错误根因」的失败最费时间 —— 要写进 `DELIVERY.md` 的排障提示。）
+
+**修法（把 `rust` job 的两步原样复制到 `package` job，10 秒）**：
+
+```yaml
+      - name: Read the pinned ZSUI revision
+        id: dependency
+        shell: pwsh
+        run: '"revision=$((Get-Content -LiteralPath app/packaging/zsui-revision.txt -Raw).Trim())" >> $env:GITHUB_OUTPUT'
+      - uses: actions/checkout@v7
+        with:
+          repository: qiu7824/zsui
+          ref: ${{ steps.dependency.outputs.revision }}
+          path: zsui
+```
+
+**通用规则（写进契约）**：**任何会跑 cargo 的 job，都必须具备 workspace 的全部 path 依赖**；
+`zsui` 与 `app/` 同级 → 凡以 `app/` 为工作目录的 job 都要检出 `zsui/`。
+→ 将来再加 job（发布 job / 基准 job）时**照这条抄**，别再踩。
+
+**✅ 修复已落地**（运维 2026-11-13 回报，QA 复核确认）：`build.yml` 的 `rust` job（`:30-44`）与
+**`package` job（`:359-380`，注释块 `:363-368` 逐字写明了推理）现在都 checkout 了 `zsui`**，
+用 `app/packaging/zsui-revision.txt` 的钉版 ✓。→ **本条闭环**。
+
+> **顺带**：这条也解释了「戳记断言为什么在 CI 上可能失败」——
+> 戳记由 `crates/zsdesk-coreui/build.rs` 产出，**前提是 cargo 真的跑起来了**。
+> M3 收口掉 `zsui` 依赖后，这个前提才会消失（见 §3.5 第 33 条 G10）。
+
+### 4.8 ★ 门禁执行契约 —— **脚本已存在，CI 一步都没调用**（QA 2026-11-13 报，架构侧复核确认）
+
+> **按 `mechanical-gates.md` 的铁律：「没有执行器的规则只是建议。」**
+> 现状：`build.yml` 里 **零** 处调用 `scripts/gates/**`（`grep 'scripts/gates|qa_uix_verify|uix_tag_check|theme_contrast|s13_token' build.yml` → 0 命中）
+> → **包括 S13 在内，这些门禁现在都只在本地手工跑，CI 不执行** → 等于没有门禁。
+
+**契约（逐条可执行）**：
+
+| # | 门禁 | 脚本（**已存在**） | 调用命令 | 作用 |
+|---|---|---|---|---|
+| G-S13 | **S13 token 不撞名** | `scripts/gates/s13_token_namespace_check.py` | `python3 scripts/gates/s13_token_namespace_check.py --root .` | 库 34 个 token 名单判定 + `.uix` 禁定义 `--app-accent` + `themes.json` 允许 + 只拦定义不拦 `var()` 引用 |
+| G-ID | **id 清单 == 实际 id 集合** | `scripts/gates/ui_id_manifest_check.py` | `python3 scripts/gates/ui_id_manifest_check.py --root .` | 期望集（`assets/ui-ids.json`）与 `.uix` 实际 id 双向比对 + 逐页条数 + **同页重 id** |
+| G-S7' | **core-ui 导出面** | `scripts/gates/coreui_export_gate.py` | `python3 scripts/gates/coreui_export_gate.py --dll core-ui/clang-cl-build/core-ui.dll --source-dir core-ui/src --include-dir core-ui/include` | CI 编出的 DLL 的导出面 vs 上游 `UI_API` 源码面 |
+| G-ASSET | **资产质量** | `scripts/gates/qa_uix_verify.py`、`theme_contrast_check.py`、`uix_tag_check.py` | 各自 `--root .` | G05 对比度 / G13 间距 / 标签 / D-15 / SFC 骨架 |
+
+**执行规则**（★ **D18 已裁决**，本节把它落成可执行条款）：
+
+1. **每个门禁一个独立 step**（不合并成一个脚本）—— 失败时**能一眼看出是哪一道**；
+2. **退出码非 0 ⇒ 该 step 失败 ⇒ job 失败**（**fail-stop**）：
+   禁止 `|| true`、禁止 `continue-on-error`（`clippy` 是**唯一的例外**，且有 M1 前的收敛期限，见 §4.1）；
+   失败时用 **`::error::` annotation** 暴露**是哪一条**；
+3. **工作目录 = 仓库根**（`app/`，因为资产与脚本都在仓库里）→ 一律用 `--root .`；
+4. **按 job 归属落位**（D18：资产类五道门进 **`rust` job**）：
+   `rust` job → G-S13 / G-ID / G-ASSET（三支）；
+   **S7' 导出面门禁需要 core-ui 的 DLL** → 只能在 `core-ui` / `package` job 里跑（`rust` job 没有 DLL）→ 落 **`package` job**；
+5. **门禁跑在 `cargo test` 之后、打包之前**（资产类门禁不需要编译产物）；
+6. **脚本必须零第三方依赖**（如 `pe_exports.py` 是纯标准库实现）→ 否则「CI 里装依赖」会成为新的失败点；
+7. ★ **解析 `.uix` 的 id 时必须先剥掉 HTML 注释**（D18 第 3 条）：
+   注释里常写 `→ <custom id="preview_image">` 这类说明文字，**裸正则会误判成「重复 id」** → 门禁必须先剥注释再计数
+   （`ui_id_manifest_check.py` 已按此实现；架构侧独立重数时也是先剥注释 → 得 32，与门禁一致 ✓）。
+
+> **架构侧已本地实跑（2026-11-13，只读）**：五个脚本全部 **EXIT=0**；
+> `ui_id_manifest_check.py` 报「共 **32** 个唯一 id，3 页」—— 与架构侧独立重数的结果一致 ✓
+> （`main.uix` 26 + `preview.uix` 6 + `about.uix` 0）。
+> ⇒ **脚本本身是可用的，缺的只是 CI 里的一步调用。**
+
 ### 4.6 一条**不属于 CI 但必须写进契约**的产品条款
 
 **Everything 引擎不入包**（已定）→ 用户的机器上**可能没有 Everything**。
@@ -290,6 +378,26 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 > 下面是架构侧基于**上游源码 + CMake 语义**给出的诊断，**按可能性排序**。
 
 ### 5.0 先说结论
+
+> ★ **最高优先级：先排除「日志被截断」**（**D17，交付总监实测定位，2026-11-13**）：
+> 连续两次 CI（run `43391037201` / `43392589050`）的 core-ui job 都「死在」
+> `[72/97] Building CXX object … src/ui/reactive/binding.cpp.obj`，**戛然而止、零编译器报错**，
+> 而 8 条 annotation 里**没有一条真 clang 报错**（全是 CMake 缓存变量）。
+> **根因不是编译错误**：
+> GitHub 的 `shell: pwsh` 注入 `$ErrorActionPreference = 'stop'`；
+> PowerShell 7.4+ 的 `$PSNativeCommandUseErrorActionPreference` 默认 `$true`；
+> 两者叠加 ⇒ native command（clang-cl）**只要往 stderr 写一行 warning** 就被判失败并抛
+> `NativeCommandExitException` → **管道被中断** → `Tee-Object` 停止 → **编译器的真实诊断从未落盘**。
+> ⇒ **修法（core-ui job 第一行）**：
+> ```powershell
+> $ErrorActionPreference = 'Continue'
+> $PSNativeCommandUseErrorActionPreference = $false
+> ```
+> ⇒ **连带修**：annotation 提取的正则由 `-match`（**不区分大小写**）改为 **`-cmatch`** ——
+> 原正则会把含 `ERROR` 的 CMake 缓存变量（`QJS_BUILD_WERROR: OFF` 等）全部命中、**占满 10 条配额**，
+> 把真正的错误挤掉；`-cmatch` 只认 clang 的 `file.cpp(12,5): error:` / `error C2220:` / `fatal error:` 与 ninja 的 `FAILED:`。
+> **教训（写进契约）**：CI 里「日志看不到」**不是日志不存在**；**先证明管道没被截断**，再谈编译错误。
+
 
 > **预置 QuickJS 到 `_deps/quickjs-src` 这个做法本身是无效的** ——
 > 它既不能让 CMake 跳过下载，又额外拖慢一次克隆。
@@ -328,7 +436,7 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 > **这不违反任何既有决策**：D03 原文就是「core-ui 自身无构建工作流，**这套步骤要我们自己维护**」。
 > 契约约束的是**构建结果**（x64 / `/MD` / 版本匹配 / 导出面一致），**不是调用哪个脚本**。
 
-### 5.2 H2 —— 预置用了 `--recurse-submodules`，会去克隆一个巨大的无用仓库
+### 5.2 H2 —— 预置用了 `--recurse-submodules`（**结论不变，理由按运维复核改正**）
 
 **依据**：quickjs-ng v0.14.0 的 `.gitmodules` 内容（已核实）：
 
@@ -341,12 +449,18 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 ```
 
 **只有一个 submodule `test262`，且 `update = none`** → **构建根本不需要它**
-（它是 JS 引擎的测试套件）。
+（它是 JS 引擎的测试套件；`cutils.h` / `libunicode.c` / `libunicode-table.h` / `gen/` 都已 vendored 在主仓里）。
+其 CMakeLists 全文**无任何下载步骤**（无 `curl`/`wget`/`ExternalProject`/`FetchContent`），
+`unicode_gen` 是 `EXCLUDE_FROM_ALL` → **构建期不联网** ✓
 
-→ **预置 clone 里的 `--recurse-submodules` 应当去掉**。
-否则会额外浅克隆 tc39/test262（体量极大）→ **慢、超时、或把 runner 的时间/带宽吃光**。
+→ **预置 clone 里的 `--recurse-submodules` 应当去掉**，浅克隆即可
+（`--branch v0.14.0` + `--depth 1`）→ 拿到的就是**完整可编译**的树。
 
-→ 预置应当用不带 `--recurse-submodules` 的浅克隆（指定 `--branch v0.14.0` + `--depth 1`）。
+> ⚠️ **措辞订正（2026-11-13，运维复核）**：此前本节写的理由是
+> 「递归会去克隆一个体量极大的 tc39/test262」—— **这个理由不成立**：
+> `update = none` 的含义是 git **不会去更新**该子模块，所以 `--recurse-submodules` **也不会**拉它。
+> **正确理由是**：v0.14.0 **根本没有构建必需的子模块** → 递归纯属多余。
+> （结论不变：不带 `--recurse-submodules`。）
 
 ### 5.3 H3 —— 真正的 C++ 编译 / 配置错误（若 H1/H2 都不是）
 
@@ -449,7 +563,7 @@ python3 scripts/gates/verify.py --phase 3        ⛔ 脚本不存在
 
 ## 9. 关联文档
 
-- `spec/ffi-core-ui.md` —— 动态加载、版本协商、revision 戳记（§5.5）、页面加载（§4.3.2）、`.uix` 三条硬约束（§4.3.3）
+- `spec/ffi-core-ui.md` —— 动态加载、版本协商、revision 戳记（§5.5）、页面加载（§4.3.2）、`.uix` 五条硬约束（§4.3.3）、页面重建生命周期（§4.6）
 - `spec/crate-layout.md` —— crate 划分、依赖方向（S9/S10 的对象）、`.uix` 资产约束
 - `spec/milestones.md` —— M0~M3 与本契约的对应（哪条门禁在哪个里程碑启用）
 - `docs/ci.md` —— 运维的实现说明

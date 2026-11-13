@@ -4,20 +4,20 @@
   "revision": {
     "date": "2026-11-13",
     "reason": "core-ui 库自带 34 个 CSS 变量 token（含 --bg / --accent / --sidebar-bg），同名时用户 :root 值虽在首次加载优先，但 ui_theme_set_mode 切深浅色时库的 RebuildThemeVars 会把这 34 个键 erase 后重写，用户值被清空 → 界面颜色突变。",
-    "decision": "全部项目 token 加 --app- 前缀，与库 token 完全不撞名。accent 是唯一的例外：它**不自定义**，由 Rust 侧读系统强调色后调 ui_theme_set_accent_hex() 写入【库 token】--accent；.uix 里一律读 var(--accent)（不要读 var(--app-accent)），以保证库自绘控件（按钮 / 焦点环 / 滑块）与 .uix 自绘区域同色。--app-accent 仅作【读不到系统色时的回退源值】。",
+    "decision": "全部项目 token 加 --app- 前缀，与库 token 完全不撞名。accent 是唯一的例外：它**不自定义**，由 Rust 侧读系统强调色后调 ui_theme_set_accent_hex() 写入【库 token】--accent；.uix 里一律读 var(--accent)（不要读 var(--app-accent)），以保证库自绘控件（按钮 / 焦点环 / 滑块）与 .uix 自绘区域同色。--app-accent 仅作【读不到系统色时的回退源值】—— 它是【数据字段，不是 CSS 变量】：Rust 读出后直接喂给 ui_theme_set_accent_hex()，**不进 :root**（见 revision.inject 口径 ③），任何 .uix 里都不得出现 var(--app-accent)。",
     "accent_source": {
       "primary": "系统强调色：Rust 读注册表 HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\AccentColor（DWORD，**BGR 序**，需转 hex）→ ui_theme_set_accent_hex()",
       "fallback": "读不到系统色时用本文件的 --app-accent（浅 #2563EB / 深 #60A5FA）",
       "note": "core-ui 全仓无 GetSysColor / UISettings / AccentColor —— 它的品牌色是内置调色板，**根本不读系统强调色**（theme.h:446-455 的 SetAccent 只接受外部传入值）→ 「跟随系统」只能由 Rust 实现。已记为 D14。",
       "order": "ui_theme_set_mode() 必须先于 ui_theme_set_accent_hex() —— set_mode 会用**当前**的 accent override 重新派生，反了就拿到上一次的。"
     },
-    "inject": "Rust 在 ui_page_load_string 之前，把本文件的键值拼成一段 ':root { --app-xxx: #xxxxxx; ... }' 并注入 .uix 源码字符串 —— 但必须注入到 <style> 块【内部】（紧跟 <style> 开头），绝不能放在源码顶层。core-ui 无运行时替换 CSS 变量的 C API（include/ui_core.h 内无相关符号）；:root 是自定义属性唯一被采集的位置（cascade.h:45，非 :root 级自定义属性被 cascade.cpp:134 忽略）；而放在源码顶层会被 sfc_parser.cpp:260-266 判为 'unexpected content at top level' → SFC parse failed → 整页不加载。",
+    "inject": "Rust 在 ui_page_load_string 之前，在 .uix 源码【最前面插入一个完整的 <style> 块】，块内写 ':root { --app-xxx: #xxxxxx; ... }'（顶层块顺序无关 —— 解析器按标签名分派到各自容器，<window>/<template>/<style> 谁先都行；插最前合法，且天然保证「注入的是第一个 :root」）。六条硬口径：① 拼进 <style> 块【内部】（Rust 统一在源码最前面插入一个完整的 <style> 块）—— 裸放源码顶层会被 sfc_parser.cpp:260-266 判为 'unexpected content at top level' → SFC parse failed → 整页不加载；② :root 里【只允许 CSS 变量】—— background/color/font-family 会被 cascade.cpp:124-126 静默丢弃（Rust 自检要断言它）；③ 根样式走 .root class（window { ... } 匹配 0 个节点）；④ Rust 侧加载前自检【四条断言】：位置（落在 <style> 内）/ 顺序（注入的是【第一个】:root）/ 内容（只含 --app-*）/ 键集（无 --app-accent）—— 任一不满足直接 fail-fast；⑤ 注入必须是【第一个】:root —— core-ui 是【先定义者赢】（LookupVar 返回第一个命中，value.cpp:573-581；cascade.h:41 'Returns first set encountered.'；:root 规则被 cascade.cpp:124-125 整条跳过、不进 CSS 级联）⇒ 注入排在 .uix 自己的 :root 之后会被【静默吃掉】（症状：切主题颜色不变，零报错）；⑥ 键集【排除 --app-accent】—— 它是 D14 的回退源值（数据字段，不是 CSS 变量），由 Rust 读出后直接喂 ui_theme_set_accent_hex()，不进 :root。⑦ 注入前必须【剥掉 UTF-8 BOM】—— 注入是前置的，若原源码以 BOM 开头，BOM 会被挤到文件中部 → SFC 顶层出现非 '<' 字符 → sfc_parser.cpp:260-266 判 'unexpected content at top level' → 整页不加载；std::fs::read_to_string 不剥 BOM，必须显式处理。 另：core-ui 无运行时替换 CSS 变量的 C API（include/ui_core.h 内无相关符号），:root 是自定义属性唯一被采集的位置（cascade.h:41-43，非 :root 级自定义属性被 cascade.cpp:134 忽略）。形态乙（插进【第一个】<style> 块的【块首】）同样满足 ⑤ —— 两者都要求「此前不能有 :root」。",
     "inject_failure_modes": [
       "顶层注入 → SFC parse failed → 一个窗口都出不来（报错信息不像标签问题，极易误判）",
-      "完全没注入 → 静默：所有 var(--app-*) 解析为空串（cascade.cpp:79-81 → ParseColor(\"\") 失败），界面能出来但全是库默认色（纯白底 / #424242 文字 / #D1D1D1 分隔线）",
+      "完全没注入 → 静默：所有 var(--app-*) 解析为空串（cascade.cpp:79-81 → ParseColor(\"\") 失败），界面能出来但全是库默认色 —— 窗口底 = 库 windowBg 纯白 #FFFFFF / 文字 = 库 kBtnText() #242424（controls.cpp:61-68）/ 【分隔线直接消失】（分隔线已是 <div class=\"divider\">，--app-divider 未定义时 background 解析失败 → 画不出来；不会再出现库色 #D1D1D1）",
       "注入晚于 ui_page_load_string → 同上，静默回落到库默认色"
     ],
-    "switch": "深浅色切换时 --app-* 只能整体换一套：Rust 需按目标模式重新注入 :root 并重建页面（ui_page_load_string 返回新 page，旧的 27 个 ui_widget_find_by_id 句柄全部失效 → 必须重取全部句柄并销毁旧 page；ui_page_reload 会重放旧源码，改不了 palette）。库自绘控件另走 ui_theme_set_mode()。",
+    "switch": "深浅色切换时 --app-* 只能整体换一套：Rust 需按目标模式重新注入 :root 并重建页面（ui_page_load_string 返回新 page，旧的 32 个 ui_widget_find_by_id 句柄全部失效（main 26 + preview 6） → 必须 ui_page_destroy 旧 page + 重取全部句柄并重挂回调；ui_page_reload 会重放旧源码，改不了 palette，句柄同样失效）。库自绘控件另走 ui_theme_set_mode()。⚠️ 切主题时【必须重读系统 AccentColor 并重调 ui_theme_set_accent_hex()】—— accent override 跨 mode 保留的是【同一个基色】（theme.h:435-439 的 SetMode 用同一个 override 值重新派生 hover/press/text 变体，基色不变），不重调就会停在旧模式的基色上。⚠️ 自动回填只覆盖一半：ui_page_on_widget_mount 钩子在新 page 上会重新触发（自绘回调自动回填 ✅），但 Rust 自己持有的 find_by_id 句柄不会自动更新（❌）→ 必须主动重取。",
     "detail": "docs/12-UIX-TAG-FIX.md §4"
   },
   "light": {

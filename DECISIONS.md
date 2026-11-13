@@ -132,6 +132,26 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
      核对方法：造一张 4×4 半透明测试图灌进去，截图看边缘有没有发黑。
 - **覆盖路线图 §4 P3**（原 P3 的「复用 `preview_process`/`quicklook`/`image_decode` 链路」
   并称之为「GuoheView **强关联**图片预览」→ 该「强关联」形态已被 D02 顶掉）。
+- **★ D06-1 承载方式细化（2026-11-13，第七轮）**：D06 的**实质不变**
+  （图片**留在程序内**、WIC 解码、不依赖 `ghde.dll`）；
+  变的只是**「谁来承载这张图」**：
+  - 原写法「`ui_image_set_pixels` → core-ui 的 ImageView 负责缩放/平移/适应」——
+    **实现风险已查清并改道**：`ui_image_view()` 是**运行时创建的控件** →
+    **拿不到 CSS**（`ApplyCommonStyle` 只有 `compiler.cpp:920` 与 `widget_factory.cpp:1363` 两个调用点）
+    → 尺寸只能 `ui_widget_set_size` **手算 px**；且它作为**运行时插入的子控件**如何参与父容器布局，
+    core-ui **没有公开承诺** → **风险不可控**。
+    声明式 `<img>` 也不行：它的 `src` 是**资产 key**（`ui_asset_register_*` 解析），
+    **没有运行时改 `src` 的 API**。
+  - **新做法**：Rust 在 **`<custom id="preview_image">`** 里 blit ——
+    `ui_bitmap_create(pixels, w, h, stride)` → `ui_draw_bitmap_handle(ctx, bitmap, x, y, w, h)`
+    （回调签名 `UiCustomDrawCallback(UiWidget, UiDrawCtx, UiRect, void*)` **带 draw ctx**，
+    头文件该段注释即写着「Drawing API (use inside UiCustomDrawCallback)」）→ 缩放由 Rust 算 fit。
+  - **像素管线不变**：仍是 **WIC → BGRA 预乘 → 位图**（`ui_draw_bitmap` 的像素格式要求与
+    `ui_image_set_pixels` 相同：**BGRA 预乘**）→ `spec/ffi-core-ui.md` §7.1 的像素格式章节**继续有效**；
+    上游 `image_decode.rs` **仍然直接复用**（改造点不变）。
+  - **代价**：缩放 / 平移 / 滚动**要自己实现**（首版只要 fit）；
+    M3+ 若要交互式缩放 → 「`<custom>` 内 `ui_widget_add_child` + `ui_widget_set_size` **显式定位**」
+    或 `ui_image_gdi_*` 族（这 9 个符号**可绑定**）。
 
 ### D07 原生 Shell 导航树 → **`<custom>` 自绘 + Rust 侧 `IShellItem` 枚举**
 
@@ -220,18 +240,43 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
      （读 `assets/themes.json` → 拼 CSS → 拼进 `.uix` 源码）。
      → 页面用 **`ui_page_load_string`**（`const char*` UTF-8）加载，**不是** `ui_page_load_file`；
      → **`.uix` 与 `themes.json` 必须以文件形式进包**（CI 已补，见 `spec/ci-contract.md` §3.4 第 22 条）。
-     → ★ **`:root` 注入的四条硬规则**（QA B1 复核 + 架构侧核对 `sfc_parser.cpp` 确认）：
+     → ★ **`:root` 注入的六条硬规则**（QA B1 复核 + 架构侧核对 `sfc_parser.cpp` 确认；
+     **(d) 在 2026-11-13 被 QA 的 Δ-A 纠正，架构侧已独立复核并改正**——此前写的是「最后」，**方向反了**）：
        **(a) 必须包在 `<style>` 块内**，**禁止**裸放在源码顶层
        （顶层只允许 `<window>` `<template>` `<script>` `<style>` `<import>` `<link>`；
        裸放顶层 → `unexpected content at top level` → `doc.ok=false` → **整页 load 失败**，
        报错 "SFC parse failed" 极易误判成标签问题）。
-       **推荐形态**：在源码**末尾追加一个完整的 `<style>` 块**（多个 `<style>` 块允许，
-       `sfc_parser.cpp:321-330` 无 duplicate 检查），天然保证注入值在 source order 最后。
-       **(b) `:root` 内只允许 CSS 变量声明**（`cascade.cpp:124-126` 明确
+       **推荐形态**：在源码**最前面插入一个完整的 `<style>` 块**（多个 `<style>` 块允许，
+       `sfc_parser.cpp:321-330` 无 duplicate 检查；顶层块顺序无关 → 插最前天然保证注入是**第一个** `:root`）。
+       **(b) `:root` 内只允许 CSS 变量声明**（`cascade.cpp:125` 明确
        `Skip :root — those only define CSS vars` → `background`/`color`/`font-family` 会被**静默丢弃**）。
-       **(c) 加载前必须自检**：解析注入后的源码、断言 `:root` 落在某个 `<style>` 块内，
-       不满足即 **fail-fast**（Rust 侧直接失败并说清原因）——**不许**把错误留给 core-ui 报 "SFC parse failed"。
-       **(d) 注入必须早于 load**，且注入值要在 source order 上**最后**（自定义属性同特异性后者覆盖前者）。
+       **(c) 加载前必须自检（四条断言）**：位置（`:root` 落在某个 `<style>` 块内）/
+       **顺序**（注入的是**整张样式表**里第一个 `:root`；且源码里**没有 `<link rel="stylesheet">`**）/
+       内容（`:root` 内每条声明都匹配 `--app-[a-z0-9-]+\s*:`）/
+       键集（不含 `--app-accent`、不撞库 token 34 个）→ 任一不满足即 **fail-fast**
+       （Rust 侧直接失败并说清**是哪一条**）——**不许**把错误留给 core-ui 报 "SFC parse failed"。
+       **(d) 注入必须早于 load**，且**注入的 `:root` 必须是「整张样式表」里的第一个 `:root`**
+       （整张样式表 = **`<link>` 引的 CSS（在前，`page_api.cpp:271-277`）+ inline `<style>`（在后）**；
+       本项目**零 `<link>`** → 等价于「源码里第一个 `:root`」）
+       ——
+       ★ core-ui 的自定义属性是**先定义者赢**，不是「后者覆盖前者」：
+       `CollectRootVars`（`cascade.cpp:20-33`）按文档顺序推进有序向量，
+       `LookupVar`（`value.cpp:572-579`）**返回第一个命中**，
+       `cascade.h:41` 注释逐字「**Returns first set encountered**」，
+       且 `:root` 规则在普通级联里被**整条跳过**（`cascade.cpp:125`）→ **根本不参与 CSS 级联**。
+       ⇒ 注入若排在 `.uix` 自己的 `:root` 之后 → **`.uix` 的值赢** → Rust 的注入被**静默忽略** →
+       症状是「切主题颜色不变」，**没有任何报错**。
+       **★ 注入位置的正式裁定（QA 第五轮提请裁，架构侧 2026-11-13 裁）：选「甲A —— 在源码最前插入」**
+       （契约上一轮已改为甲A，本轮**补全前提**并正式定案）：
+       ① **无条件成立**，不依赖「`.uix` 里没有 `:root`」这个巧合 —— 将来有人往 `.uix` 写 `:root` 也不会静默压掉注入值；
+       ② **Rust 侧代码量相同**（prepend 与 append 都是一次字符串 concat）；
+       ③ 证据 C（SFC 顶层标签**不限顺序**，`sfc_parser.cpp:252-297`）保证语法合法；
+       ④ 唯一残留前提 = 证据 B（`<link>` CSS 里不能有 `:root`）→ 三个资产零 `<link>`，Rust 自检顺手断言即可。
+       （被否的是「甲B —— 保留末尾追加 + 靠门禁禁止 `.uix` 出现 `:root`」：
+       把正确性押在「资产里永远不会出现 `:root`」这种约定上，而违约的代价是**静默失效**，不值得。）
+       （QA 实测：三个 `.uix` 当前**生效**的 `:root` 规则数 = **0** → 今天不暴露，但这是埋着的雷。）
+       **(e) 键集排除 `--app-accent`**（D14：它是回退源值，不是 CSS 变量）。
+       **(f) `:root` 内只允许 CSS 变量**（= (b) 的**断言版**：Rust 自检必须拦，不只是建议）。
   2. **Rust 初始化调用顺序**：
      `ui_theme_set_default_font` → `ui_theme_set_cjk_font` → `ui_theme_set_mode` →
      `ui_theme_set_accent_hex` → 拼 `:root` → `ui_page_load_string`。
@@ -241,8 +286,9 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 - **代价**：
   1. 明暗切换时，**库自绘控件跟随库 palette 变，本项目自绘区域（`--app-*`）不会自动跟随** ——
      必须重建页面才变（这是改名避让路线的固有代价，已接受）；
-  2. **重建页面 = 重建控件树** → 自绘控件要重新取句柄并重挂回调
-     （`ui_page_on_widget_mount` 按 id 持久化 → **自动回填**，见 D12）；
+  2. **重建页面 = 重建控件树** → **32 个句柄全部失效**（`main.uix` 26 + `preview.uix` 6）→
+     必须**重取全部句柄** + **在新 page 上重新注册 `ui_page_on_widget_mount`**
+     （钩子挂在**具体 page** 的 `PageState` 上 → **不自动转移**；catch-up 保证「注册即触发」）；
      重建期间有一次闪烁（M1/M2 要量一下）；
   3. 门禁 **S13**（最终表述见下）。
 - **三个补充问答（2026-11-13 team-lead 提出，架构师定稿）**：
@@ -295,10 +341,12 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 
 ### D12 `.uix` 资产契约与自绘挂载选型（2026-11-13 源码级核对后定稿）
 
-> 触发：前端在改 `.uix` 资产时发现三处「资产写法与 core-ui 实际语义不符」，
-> 架构师**独立核对上游源码**后定稿。详细依据见 `spec/ffi-core-ui.md` §4.3.1 / §4.3.3。
+> 触发：前端在改 `.uix` 资产时发现「资产写法与 core-ui 实际语义不符」之处（第一轮 3 处，
+> 第二轮又补 2 条 P0 + 1 条分隔线问题），架构师**逐条独立核对上游源码**后定稿。
+> 详细依据见 `spec/ffi-core-ui.md` §4.3.1 / §4.3.3 / §4.6。
 
-- **D12-1 自绘控件挂载 → 选 (b) `.uix` 里声明 `<custom id="file_list" class="list-host"/>`**
+- **D12-1 自绘控件挂载 → 选 (b) `.uix` 里声明 `<custom id="list_host" class="list-host"/>`**
+  （★ **id 以资产为准**：`list_host`，不是 `file_list`；命名规则 `<区域>_host`）
   （**不用** (a) 运行时 `ui_custom()` + `ui_widget_add_child()`）。
   **决定性理由是布局，不是 API 好不好用**：运行时造的控件**没有 CSS 级联结果**
   → 无 `flex-grow`/`width`/`height` → 在 flex 容器里**尺寸为 0** → **列表区空白**；
@@ -328,17 +376,80 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
   `:root` 内**只放 CSS 变量**（`cascade.cpp:124-126` 会跳过普通声明）；
   Rust 侧**加载前自检**，不满足即 fail-fast。完整措辞见 **D10 契约 1** 与
   `spec/ffi-core-ui.md` §4.3.2.1。
+- **D12-6 ★ `<separator>` 不画 CSS `background`**（前端第二轮 P0，架构侧已核对
+  `src/ui/controls.cpp:635-643`：`SeparatorWidget::OnDraw` **不调用** `Widget::OnDraw`，
+  颜色写死 `theme::kDivider()` = **库 token**）→ 要跟项目 token `--app-divider` 同色，
+  **必须用 1px `<div class="sep"/>` + `background`**。
+  **修正前端的一处事实**：上游 demo 并非「`<separator>` 一次没用」——
+  `demo/ui_demo.uix` 里 `class="sep"` **19 处**、`<separator/>` **3 处**（那 3 处**全在 `<menu>` 内部**，
+  菜单分隔线用库色正好）。**结论不变**：布局分隔线跟项目 token 同色 → 用 `<div class="sep"/>`。
+  **附带提醒**：demo 的 `.sep` 用的是**库 token** `var(--border-subtle)`；
+  本项目要用 `var(--app-divider)`，否则分隔线**不随主题切换**（`--app-*` 不会自动变，见 D10 契约 3）。
+- **D12-7 ★ 页面重建后句柄全部失效**（前端第二轮 P0，架构侧已核对
+  `page_api.cpp`：`ui_page_load_string` → `Registry().Insert(std::make_unique<PageEntry>())`，
+  旧控件被销毁；`ui_page_reload`（`:565-577`）**重放旧源码** → 改不了 palette，**且同样重新编译** →
+  同样失效）。
+  → **三步协议**：`ui_page_destroy(旧 page)` → `ui_page_load_string(新源码)` → **重取全部 32 个句柄**
+  （`main.uix` 21 + `preview.uix` 6，架构侧已独立复核 distinct 数）→ 重挂回调 / 重投影状态。
+  **旧句柄继续用 = 写野内存 → 静默崩溃 / 花屏，不会报「句柄无效」。**
+  **「自动回填」只覆盖一半**：`ui_page_on_widget_mount` 会自动回填**自绘控件的绘制回调** ✅，
+  但**不会**更新 Rust 侧持有的 `ui_widget_find_by_id` 句柄 ❌。
+  完整协议与故障判据见 `spec/ffi-core-ui.md` **§4.6**。
+- **D12-8 「加载后断言颜色」在 API 层面做不了** —— core-ui **没有**读回 CSS 变量的 C API
+  （导出面只有 `ui_widget_set_bg_color` / `ui_widget_set_text_color` 这类**写**接口；
+  `ui_theme_bg()` 等只读**库 token**，读不到 `--app-*`；架构侧已扫全导出表确认）。
+  → 「压根没注入」这个**静默**失败项，只能用**离屏渲染取像素**验（一次性冒烟，不进启动路径）；
+  启动路径只保留**加载前自检**。见 `spec/ffi-core-ui.md` §4.3.2.1 末尾。
+- **D12-9 ★ 自绘宿主的判定规则与三个宿主的裁定**（第七轮，前端第三轮提问）
+  **规则（一条）**：**这块矩形的内容是不是 Rust 用绘制指令画出来的？**
+  是 → `<custom>`；否（core-ui 控件 / 文本投影）→ `<div>` / `<label>`；
+  混合 → **`<div>` 容器 + 里面的 `<custom>` 子宿主**。
+  | id | 裁定 | 理由 |
+  |---|---|---|
+  | `nav_host` | ✅ **改 `<custom>`** | 不是「为了统一」：`<div>` 上 `ui_custom_on_draw` 是**静默 no-op** → **树根本画不出来**（D07 已定导航树是 Rust 自绘） |
+  | `breadcrumb` | ⛔ **不改 `<custom>`**，但**要改形态**：`<label id="breadcrumb">` + Rust `ui_label_set_text` | 面包屑是**文本投影**不是自绘画布；且现在是**空 `<div>` → 显示不出任何东西**（真缺口） |
+  | `preview_host` | ✅ **保持 `<div>` 作容器**，里面加 `<custom id="preview_image">` + 预先声明的 `<label>` 元信息行 | 图片与元信息是「混合」；见 **D06-1**（不用 `ui_image_view()` 当子控件的理由） |
+  **规则里没有「API 好不好用」**：运行时 `ui_custom()` 也能挂回调，但它**不经过 `ApplyCommonStyle`**
+  （该函数全仓只有 `compiler.cpp:920` 与 `widget_factory.cpp:1363` 两个调用点）→ **没有 CSS** →
+  flex 容器里**尺寸为 0** → 这是**布局问题**。
+  **id 以资产为准**：列表宿主是 **`list_host`**（不是 `file_list`；本台账与各 Spec 里的旧举例已全部改正），
+  命名规则 **`<区域>_host`**。
+- **D12-10 ★ 修正架构侧自己上一版的措辞：「按 id 持久化 → 重建后自动回填」不成立**
+  `ui_page_on_widget_mount` 的钩子挂在**具体 page** 上（`page_api.cpp:850-854` → `e->state->OnWidgetMount`
+  → 存进该 `PageState` 的 `lifecycleHooks_`）：
+  - **同一个 page 内**晚出现的控件（v-if / v-for 重建）→ 钩子**自动补发** ✅
+    （且注册时若树上已有同 id 控件会**立刻调一次** = catch-up，`page_state.cpp:635-652`）；
+  - **切主题重建出新 page** → 新 `PageState` 的钩子表**是空的** → **不会自动转移** ❌
+    → Rust **必须在新 page 上重新注册**（`ui_page_on_widget_mount(new_page, id, cb, ud)`，
+    catch-up 保证**注册即触发**，不需要额外的同步等待）。
+  → **重建三步**（`spec/ffi-core-ui.md` §4.6）：
+  `ui_page_destroy(旧)` → `ui_page_load_string(新)` → **重取全部 32 个句柄 + 在新 page 上重新注册钩子**。
+  **代价**：句柄表要收敛到**一个**结构（`crates/zsdesk-ui/src/shell_page.rs`），重建走**唯一一条路径**。
+- **D12-11 ★ 同一棵树内 id 必须唯一（2026-11-13，前端提问时核源码得出）**
+  `Widget::FindById`（`src/ui/widget.cpp:619-626`）是**深度优先、整棵子树、首个命中**的查找
+  （先比 `this->id`，再按 `children_` 顺序递归，**命中即返回**）
+  → **同一棵树里出现重 id → `ui_widget_find_by_id` 取到 DFS 里靠前的那个**，另一个**永远取不到**，**且不报错**。
+  → **命名规则**：`main.uix` 预览窗格内的控件用 **`preview_host_*`** 前缀，`preview.uix` 自己的用 `preview_*`；
+  将来若把某页面的根**嫁接**进另一棵树，两边 id 也不撞。
+  （前端主动采用 `preview_host_*` 前缀 —— **采纳**，理由与本条一致。）
+- **句柄数随资产更新（2026-11-13）**：`main.uix` **21 → 26**、全项目 **27 → 32**
+  （新增 `preview_image` + `preview_host_{name,size,channel,state}` 四个 `<label>`；`preview.uix` 仍 6）。
+  → `spec/ffi-core-ui.md` §4.6.3 / `spec/crate-layout.md` §4.5 / M1-10 / V1.13 / `SPEC.md` 风险表第 8 条**已同步**。
+  → **新增一条工程约定**：句柄数**不要硬编码** → Rust 侧维护「期望 id 清单」，
+  装配时断言「期望集合 == 实际集合」，资产改 id 时由**门禁**比对，而不是靠人记得改文档。
 - **代价**：
-  1. `.uix` 资产必须多一次机械评审（标签自闭合 / 文字位置 / 根 class / token 命名空间 / `:root` 落点）；
+  1. `.uix` 资产必须多一次机械评审（标签自闭合 / 文字位置 / 根 class / token 命名空间 / `:root` 落点 / 分隔线写法 / **宿主标签选型** / **id 唯一性**）；
   2. 根 `<div>` 必须显式加 `class="root"`（原来靠 `window {}` 的写法要改）；
   3. 每条 `.uix` 硬约束都应有一条**可执行**的检查（否则靠人记）→ 并入门禁 S13 与前端自检脚本；
-  4. Rust 侧要实现一个「`:root` 是否落在 `<style>` 内」的自检（几十行）。
+  4. Rust 侧要实现一个「`:root` 是否落在 `<style>` 内」的自检（几十行）；
+  5. **切主题 / 换 accent 必须重建页面 + 重取 32 个句柄** → 句柄表要收敛到**一个**结构
+     （`crates/zsdesk-ui/src/shell_page.rs`），重建走**唯一一条路径**，否则漏一个 = 野指针。
 
 ---
 
 ## D13 无障碍与窗口材质 → **接受降级并记录**（用户 2026-11-13 拍板）
 
-**实测依据**（PM 独立核实）：core-ui **没有** Mica / Acrylic / 高对比度 / UIA 入口 ——
+**实测依据**（PM 独立核实 + QA 第五轮逐项复核 + 架构侧复核）：core-ui **没有** Mica / Acrylic / 高对比度 / UIA 入口 ——
 `src/ui/ui_window.cpp` 的 `DwmSetWindowAttribute` 只用于 `TRANSITIONS_FORCEDISABLED` 与圆角偏好；`mica` / `acrylic` / `backdrop` 零命中；`src/ui/theme.h` 的 `HighContrast` / `AppsUseLightTheme` 零命中；`src/ui/widget.cpp` / `ui_api.cpp` 的 `uia` / `accessibility` / `narrator` 零命中。
 
 **因此必然丢失的能力**
@@ -346,7 +457,7 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 |---|---|---|
 | **高对比度模式** | ❌ 不可实现 | core-ui 自绘控件不向 UIA 暴露接口，系统高对比度不会自动接管 |
 | **读屏 / Narrator** | ❌ 不可实现 | 同上 |
-| **Mica / Acrylic 材质** | ❌ 丢失 | zsdesk 上游自己用 DWM 实现（`crates/zsdesk-app/src/theme.rs:131-194`），换 core-ui 后不复存在 |
+| **Mica / Acrylic 材质** | ❌ 丢失 | zsdesk 上游自己用 DWM 实现（`crates/zsdesk-windows/src/theme.rs:131-194`，`DWMWA_SYSTEMBACKDROP_TYPE`），换 core-ui 后不复存在 |
 | 深色标题栏与窗口圆角 | ⚠️ 降级 | core-ui 只暴露圆角偏好，不暴露系统材质 |
 
 **连带动作**
@@ -386,7 +497,7 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 - `spec/ffi-core-ui.md` **§5.6.2「D14 品牌色来源契约」**（读取契约逐字 + 落点 + 启动日志格式 + 连带影响）；
 - `spec/ffi-core-ui.md` **§5.6.1 契约 2**（初始化顺序加第 0 步；`set_accent_hex` 在 `set_mode` **之后**；切模式后必须**重读重调**）；
 - `spec/ffi-core-ui.md` §4.3.2.1 **规则 5**（拼 `:root` 时**排除 `--app-accent`**）；
-- `spec/crate-layout.md` **§4.4「Rust 侧启动初始化职责落点」**（读注册表 → `crates/zsdesk-windows/src/system/accent.rs`；拼装 → `crates/zsdesk-app/src/theme.rs`；依赖方向不新增环）；
+- `spec/crate-layout.md` **§4.4「Rust 侧启动初始化职责落点」**（读注册表 → `crates/zsdesk-windows/src/theme.rs`（改造）；拼装 → `crates/zsdesk-ui/src/theme.rs`（上游同名文件，已有 `Mode`/`Palette`/`accent`）；依赖方向不新增环）；
 - `spec/milestones.md` M1 产出物 **M1-9** + 验收 **V1.11**（启动日志打印 accent 值与来源，真机核对）；
 - 门禁 **S13 细化**：`themes.json` 允许 `--app-accent`（回退源值），`.uix` 禁止定义它，任何文件禁止定义库 token 全集。
 
@@ -398,9 +509,9 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 |---|---|---|
 | **F1 `:root` 注入** | 拼进 `.uix` 源码里**已有的 `<style>` 块内部**（该块最后一行 `</style>` 之前）；`:root` 内**只允许 `--app-*` 变量声明**，不得写 `background`/`color`/`font` | QA 的 B1 与架构师独立核实同向：`sfc_parser.cpp:260-266` 顶层非 `<` 内容 → `doc.ok=false`；`cascade.cpp:125` 明确 `:root` 只收 CSS 变量 |
 | **F2 深浅色** | 与 F1 同因：`--app-*` **不随** `ui_theme_set_mode` 变化 → 切主题**必须重建页面**并重新注入目标主题的那一套 `:root` 值 | `page_state.cpp:688-702` 的 `RefreshThemeStyles` 只重写库的 34 个键、不重新采集 `:root` |
-| **F3 句柄** | 重建页面后，27 个 `ui_widget_find_by_id` 句柄**全部失效** → 必须重新绑定；旧 page 必须销毁 | 架构师 FFI v3 §9.4 |
+| **F3 句柄** | 重建页面后，32 个 `ui_widget_find_by_id` 句柄**全部失效** → 必须重新绑定；旧 page 必须销毁 | 架构师 FFI v3 §9.4 |
 | **F4 字体** | 字体是**库 token**，不在 `--app-*` 内 → 切主题**不**触发重建 | 架构师 FFI v3 §9.4 |
-| **F5 accent** | `ui_theme_set_accent_hex` **不随** `ui_theme_set_mode` 保留生效 → 切主题时必须**重读系统 AccentColor 并重调**（与 D14 的读注册表路径一致） | 架构师 FFI v3 §9.4；修正了前端此前「跨模式保留」的表述（保留的是同一个值，但不会自动重新应用） |
+| **F5 accent** | `ui_theme_set_accent_hex` 设的基色**跨 `ui_theme_set_mode` 保留**（`theme.h:435-440` 的 `SetMode` 里 `if (AccentOverrideActive()) ApplyAccent(AccentOverrideValue());`）—— `SetMode` 只用它**重新派生 hover / press / text 变体，不换基色**。⇒ 切主题时必须**重读系统 AccentColor 并重调** `ui_theme_set_accent_hex`，否则 accent 会停在**旧模式的基色** | 架构师 FFI v3 §9.4 + QA §12 的源码复核；修正了本表早先「不随 set_mode 保留生效」的错误表述 |
 
 **三个 Rust 侧 P0（UNVERIFIED，禁止编造签名）**——需在 M1 第一步用真机最小探针逐项验：
 1. `ui_page_load_string` 的所有权约定（返回的 page / 字符串是否需要调用方释放）
@@ -436,6 +547,111 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 
 ---
 
+## D17 CI 日志截断的根因与修法（2026-11-13，交付总监实测定位）
+
+**现象**：连续两次 CI（run `43391037201` / `43392589050`）的 core-ui job 都在
+`[72/97] Building CXX object CMakeFiles\core-ui.dir\src\ui\reactive\binding.cpp.obj`
+这一行**戛然而止**，之后没有任何编译器输出；check-run 的 8 条 annotation 里
+**没有一条真正的 clang 报错**，全是 CMake 缓存变量（`QJS_BUILD_WERROR: OFF` /
+`BUILD_SHARED_LIBS: OFF`）。
+
+**根因**（不是编译错误）：
+- GitHub 的 `shell: pwsh` 注入 `$ErrorActionPreference = 'stop'`；
+- PowerShell 7.4+ 的 `$PSNativeCommandUseErrorActionPreference` 默认为 `$true`；
+- 二者叠加 ⇒ native command（clang-cl）**只要往 stderr 写一行 warning**，
+  就被判定为失败并抛 `NativeCommandExitException` → **管道被中断** →
+  `Tee-Object` 停止 → 编译器的真实诊断**从未落盘**。
+
+⇒ 所以「死在 binding.cpp」是假象：真正的 warning/error 一直在，只是被丢了。
+而且「最后一行 warning」与「最后一行 error」都会触发中断，**位置随机**。
+
+**修法**（`build.yml` 的 core-ui job 第一行）：
+```powershell
+$ErrorActionPreference = 'Continue'
+$PSNativeCommandUseErrorActionPreference = $false
+```
+关掉之后 stderr 正常流进日志。
+
+**连带修**：annotation 提取的正则原为 `-match`（**不区分大小写**），
+会把含 `ERROR` 的 CMake 缓存变量全部命中、占满 10 条配额，把真正的错误挤掉
+→ 改为 `-cmatch`（区分大小写），只认 clang 的 `file.cpp(12,5): error:` /
+`error C2220:` / `fatal error:` 与 ninja 的 `FAILED:`。
+
+**教训**：CI 里「日志看不到」不是日志不存在；**先证明管道没被截断**，再谈编译错误。
+
+---
+
+## D18 门禁必须在 CI 里真正执行（QA 第九轮纠正，2026-11-13）
+
+**问题**：四个机械门禁脚本（`uix_tag_check` / `theme_contrast_check` /
+`qa_uix_verify` / `s13_token_namespace_check`）此前**只存在于仓库里，CI 从不执行**。
+按「**没有执行器的规则只是建议**」，S13 那一整套口径当时并不成立。
+
+**裁决**：
+1. 五个门禁全部接进 `build.yml` 的 **rust job**（新增步骤「Gate S13」），
+   任一非零退出即**阻断该 job**，并以 `::error::` annotation 暴露是哪一条。
+2. 新增第六个门禁 `scripts/gates/ui_id_manifest_check.py` ——
+   **id 清单不再硬编码在文档里**，而是单一事实源 `assets/ui-ids.json`，
+   门禁双向比对（清单有而页面缺 / 页面有而清单缺 / 计数不符 / 页内重复 id）。
+3. 解析 `.uix` 的 id 时**必须先剥掉 HTML 注释** —— 注释里常写
+   `→ <custom id="preview_image">` 这类说明文字，裸正则会误判成「重复 id」。
+
+---
+
+## D19 S7' 导出面门禁的判定基准（2026-11-13）
+
+**问题**：`docs/05-COREUI-EXPORTS.txt` 记录的是**本机预编译 DLL（1.9.0.346）**
+的实测导出面，而 CI 编的是**钉住的 revision 345**。直接比对两者会得到
+**版本漂移**，而非真实缺陷。
+
+**裁决**：S7' 的基准 = **同一 checkout 里 `src/` 的 `UI_API` 定义集**。
+- 版本天然一致（同一个 checkout），不存在跨版本比对；
+- **不用头文件做基准**：上游 `include/ui_core.h` **漏声明** 12 个符号
+  （`ui_image_gdi_*` 与 `ui_flush_gpu`，在 `src/ui/ui_api.cpp` 里确实有
+  `UI_API` 定义）→ 用头文件会把它们误判成「unexpected」；
+- `ui_dialog` 在头文件里声明了但源码里**没有** `UI_API` 定义 → 库里不导出它，
+  属上游已知缺口，**容忍并报告**（不静默放宽）。
+
+**实现**：`scripts/gates/pe_exports.py`（无外部依赖的 PE 导出表解析器）
++ `scripts/gates/coreui_export_gate.py`（比对）。
+**验证**：解析器用本机 `GuoheView\core-ui.dll` 实测，**逐字节复现**
+`docs/05` 的 567 个 `ui_*` 基线；正例（346 DLL 对 345 源码）通过、
+反例（截断 DLL / 无 `ui_*` 的 kernel32.dll）均正确失败。
+
+---
+
+## D20 `:root` 注入形态 = 甲（源码最前面插入完整 `<style>` 块）（2026-11-13）
+
+**背景**：core-ui 的 `:root` 是**先定义者赢**
+（`value.cpp:572-579` 的 `LookupVar` 返回第一个命中、
+`cascade.h:41` 注释逐字「Returns first set encountered」、
+`cascade.cpp:125` 让 `:root` 整条跳过 CSS 级联）。
+⇒ Rust 注入的 `:root` 必须排在页面自己的 `:root` **之前**，否则被**静默吃掉**
+（症状：切主题颜色不变，零报错）。
+
+**候选形态**：
+| 形态 | 做法 | 结论 |
+|---|---|---|
+| 甲 | 在**源码最前面**插入一个完整的 `<style>` 块 | ✅ **采纳** |
+| 乙 | 插进页面**已有的**第一个 `<style>` 块块首 | ⚠️ 合法但脆弱（页面没有 `<style>` 时无从下手） |
+| ✗ | 裸 `:root{}` 放在源码顶层 | ❌ **整页解析失败** |
+
+**甲为什么成立**（源码级验证）：
+- 顶层标签**顺序无关**（`sfc_parser.cpp` 按标签名分派到各自容器）；
+- `doc.styles` 按源码中 `<style>` 出现的顺序收集（`sfc_parser.cpp:330`）；
+- `page_api.cpp:333` 按该顺序**逐块 parse 压入同一 sheet**
+  ⇒ 插在最前面的块是 `blocks[0]` ⇒ 它的 `:root` 排在页面自己的 `:root` 之前
+  ⇒ **页面自己的定义胜出**（符合「页面可覆盖品牌默认值」的直觉）。
+
+**✗ 为什么绝对不行**：`sfc_parser.cpp:264-270` 明确只允许
+`<window> / <template> / <script> / <style> / <import> / <link>` 作为顶层标签，
+任何不以 `<` 开头的顶层内容 → `"unexpected content at top level"` →
+`doc.ok = false` → **整页不加载，且报错信息完全不像标签问题，极难定位**。
+
+**落地**：`crates/zsdesk-coreui/src/lib/theme.rs` —— 形态甲 + 单元测试 9 条。
+
+---
+
 ## 技术后果汇总（D01–D05 组合后必须一并解决）
 
 | # | 后果 | 归属 | 状态 |
@@ -451,7 +667,7 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 
 ---
 
-## 变更记录
+## 变更记录## 变更记录## 变更记录
 - 2026-11-13 建台账；D00 录入对话原话前提。
 - 2026-11-13 对话决策卡拍板 D01–D04（与用户 fork 路线图 C3/C3.6 一致；D02、D03 与路线图 P3 有出入，**以对话为准**）。
 - 2026-11-13 用户明确「以本次对话中的选择为主」，写入决策优先级规则。
@@ -522,5 +738,170 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
     `spec/ci-contract.md` §4.2 由「产出方待定」改为 **✅ 已定：Rust 产出**。
   - **`:root` 注入的四口径定稿**（前端已按此改完 `assets/themes.json`）：
     `spec/ffi-core-ui.md` §4.3.2.1 与 `spec/crate-layout.md` §4.3.1 **逐字一致** ——
-    ① 拼进 `<style>` 块内（Rust 统一**末尾追加完整 `<style>` 块**）；
+    ① 拼进 `<style>` 块内（Rust 统一**在源码最前面插入**完整 `<style>` 块 —— **必须是第一个 `:root`**，见 D10 契约 1(d)）；
     ② 只允许 CSS 变量；③ 根样式走 `.root` class；④ Rust 侧加载前自检 + fail-fast。
+- 2026-11-13 **第六轮（前端第二轮 P0：`:root` 注入位置 + 切主题句柄失效 + 分隔线）**：
+  - **架构侧逐条独立核对上游源码**，结论：两条 P0 **成立**；另**更正前端一处事实**。
+  - **D12-5 补强**：`:root` 注入位置已由 QA B1 与前端两条消息**三方一致**，
+    并在 `spec/ffi-core-ui.md` §4.3.2.1 末尾补上**「加载后断言颜色能不能做」的诚实答案**：
+    core-ui **无读回 CSS 变量的 C API** → 只能靠**离屏渲染取像素**（一次性冒烟，不进启动路径）；
+    启动路径只保留**加载前自检**。
+  - **D12-6 新增**：`<separator>` **不画 CSS `background`**（`controls.cpp:635-643`，
+    颜色写死 `theme::kDivider()`）→ 布局分隔线要跟 `--app-divider` 同色**必须**用
+    1px `<div class="sep"/>`。
+    **更正前端**：「demo 里 `<separator>` 一次没用」**不准确** —— 实测 `class="sep"` **19 处**、
+    `<separator/>` **3 处**（那 3 处**全在 `<menu>` 内部**）；**结论不变**。
+  - **D12-7 新增**：页面重建后 **句柄全部失效**（**2026-11-13 资产更新后为 32 个**：`main.uix` 26 + `preview.uix` 6，
+    架构侧已复核 distinct 数）→ 三步协议（destroy → load → 重取全部句柄）；
+    `ui_page_reload` 重放旧源码**帮不上忙**（`page_api.cpp:565-577`）且**同样重新编译**；
+    「自动回填」只覆盖**自绘回调**，不覆盖 Rust 侧句柄表。
+    → 新增 `spec/ffi-core-ui.md` **§4.6「页面重建的生命周期契约」**、
+    `spec/crate-layout.md` **§4.5**（句柄表落点 `zsdesk-ui/src/shell_page.rs`）、
+    M1 产出物 **M1-10**、M1 验收 **V1.13**；`SPEC.md` 风险表新增第 **8** 条（野指针）。
+  - **D12-8 新增**：「加载后断言颜色」在 API 层面做不了（无读回 API）→ 改为离屏像素冒烟
+    （M1 验收 **V1.15**）。
+  - **M1 验收新增 V1.14**：分隔线颜色 = `--app-divider`。
+  - **`.uix` 硬约束由三条增至四条**（§4.3.3 标题与 `spec/milestones.md` V0.14、`spec/ci-contract.md` 关联文档同步）。
+- 2026-11-13 **第七轮（前端第三轮：id 归属 + 挂载钩子是否自动转移 + 三个宿主待裁决）**：
+  - **① id 以资产为准 = `list_host`** —— 前端指出我在两处举例写了 `file_list` / `list_list`，
+    而资产的既有 id 是 `list_host`（Rust 侧 `find_by_id` / `on_widget_mount` / `<menu trigger="#…">` 都用它）
+    → **前端是对的**（id 是 Rust ↔ `.uix` 的契约，不能各写各的）；
+    `spec/ffi-core-ui.md` / `spec/crate-layout.md` / `SPEC.md` / `DECISIONS.md` / ADR-0001
+    **共 8 处举例已全部改正**；命名规则定为 **`<区域>_host`**。
+  - **② ★ 架构侧自查后修正自己上一版的措辞**（「按 id 持久化 → 重建后自动回填」**不成立**）：
+    `ui_page_on_widget_mount` 的钩子挂在**具体 page** 的 `PageState` 上（`page_api.cpp:850-854`）
+    → 同一个 page 内晚出现的控件会自动补发 ✅（catch-up，`page_state.cpp:635-652`），
+    但**新 page 的钩子表是空的** → **不自动转移** ❌ → 必须在**新 page 上重新注册**（catch-up 保证注册即触发）。
+    → 重建协议由「重取句柄」扩为「**重取全部句柄 + 在新 page 上重新注册钩子**」（§4.6.2 / §4.6.4 / D12-10）。
+  - **③ 三个宿主的裁决**（新增 `spec/ffi-core-ui.md` **§4.3.4**，含判定规则）：
+    `nav_host` → **改 `<custom>`**（`<div>` 上 `ui_custom_on_draw` 是**静默 no-op** → 树画不出来）；
+    `breadcrumb` → **不改 `<custom>`**，但**要改形态**：`<label id="breadcrumb">` + Rust `ui_label_set_text`
+    （现在是**空 `<div>` → 显示不出任何东西**，是真缺口，M1 验收新增 **V1.16**）；
+    `preview_host` → **保持 `<div>` 容器** + 里面加 `<custom id="preview_image">` + 预先声明的 `<label>` 元信息行。
+  - **D06-1 预览承载方式细化**：不用 `ui_image_view()` 当子控件（运行时创建 → **无 CSS** → 尺寸手算 px，
+    且运行时插入的子控件如何参与父容器布局 core-ui **没有公开承诺**；声明式 `<img>` 的 `src` 是**资产 key**、
+    **无运行时改 src 的 API**）→ 改为 Rust 在 `<custom>` 里 `ui_bitmap_create` + `ui_draw_bitmap_handle`；
+    **D06 的实质不变**（WIC 解码、留程序内、不依赖 ghde），**像素管线不变**（仍是 BGRA 预乘），
+    **代价** = 缩放/平移要自己实现（首版只 fit），M3+ 走 `ui_image_gdi_*` 或显式定位子控件。
+  - 新增 `spec/crate-layout.md` **§4.6 自绘宿主清单**；M1 产出物 M1-3/M1-4 与 M2-5 落点同步。
+- 2026-11-13 **第八轮（QA 第五轮 Δ-A / Δ-B1 / Δ-B2 + 运维 P0 + 前端复核）**：
+  - **★ D10 契约 1 的规则 (d) 被 QA 纠正，架构侧已独立复核并改正 —— 我上一版「方向反了」**：
+    此前写「注入的 `:root` 必须在 source order 上**最后**（后者覆盖前者）」→ **错**。
+    源码级依据（架构侧亲自复核，非转述）：`CollectRootVars`（`cascade.cpp:20-33`）按**文档顺序**推进有序向量；
+    `LookupVar`（`value.cpp:572-579`）**返回第一个命中**；
+    `cascade.h:41` 注释逐字「**Returns first set encountered**」；
+    且 `:root` 规则在普通级联里被**整条跳过**（`cascade.cpp:125`）→ **根本不参与 CSS 级联**
+    ⇒ **自定义属性是「先定义者赢」**，CSS 的「后者覆盖前者」常识**在这里不适用**。
+    **后果**：注入若排在 `.uix` 自己的 `:root` 之后 → **`.uix` 的值赢** → Rust 的注入被**静默忽略**
+    → 症状「切主题颜色不变」，**零报错**（QA 实测：三个 `.uix` 当前**生效**的 `:root` 数 = **0** → 今天不暴露，但是埋着的雷）。
+    → **注入形态从「源码末尾追加」改为「源码最前面插入」**（顶层块顺序无关，解析器按标签名分派）；
+    → **Rust 自检由一条扩为四条断言**：位置 / **顺序**（注入的是第一个 `:root`）/ **内容**（`:root` 内每条声明匹配
+    `--app-[a-z0-9-]+\s*:`）/ 键集（无 `--app-accent`、不撞库 token 34 个）→ 任一不满足 fail-fast；
+    → **规则由四条扩为六条**（新增「只允许 CSS 变量」的**断言版** + 键集排除）；
+    → `spec/ffi-core-ui.md` §4.3.2.1 与 `spec/crate-layout.md` §4.3.1 的对外措辞**逐字同步**；
+    → **M1 验收 V1.12 扩为 4 个坏源码构造**（裸放顶层 / `.uix` 自带 `:root` 抢先 / 混入普通声明 / 键集含 `--app-accent`）。
+    ★ **前端需同步**：`assets/themes.json` 的 `revision.inject` 注记现在写的是「末尾追加」（形态甲的旧定义）→ **要改成「最前面插入」**。
+  - **D13 证据口径修正（QA Δ-B1）**：`backdrop` **不是零命中**（架构侧复核：`src/` 全仓 38 处命中） ——
+    ① **CSS `backdrop-filter` / `backdrop-blur` 在任意 widget 上受支持**（`widget_factory.cpp:606-610` → `w.backdropBlur = parseBlur(...)`；
+    `widget.h:245` `float backdropBlur = 0.0f;`）→ 将来做浮层模糊**用得上**；
+    ② 上下文菜单的背景模糊捕获（`context_menu.cpp`）。
+    **窗口级** Mica/Acrylic 确实零命中（`DWMWA_SYSTEMBACKDROP` / `DWMWA_MICA` / `SetWindowCompositionAttribute` / `ACCENT_POLICY` 全仓 0 命中）✓
+    → **结论不变**（D13 的三项限制成立），但**关键词清单要按此改口径**，否则读者会误以为「连 widget 级模糊都没有」。
+  - **运维 P0 落进契约（`spec/ci-contract.md` §4.7 + §3.5 第 34 条）**：
+    `package` job **只 checkout 了 `app/`**，没有 `zsui/` → 而 `crates/zsdesk-{app,ui}/Cargo.toml` 有 `zsui = { path = "../../../zsui" }`
+    → cargo **装载 workspace 清单即失败** → 连炸冒烟探针与戳记断言两处；
+    且戳记断言的报错「build.rs did not run」**指向错误根因**（真正原因是「zsui 没检出」）→ 最费时间的一类失败。
+    → 修法：把 `rust` job 的「读 pin + checkout zsui」两步原样复制到 `package` job；
+    → **通用规则写进契约**：**凡跑 cargo 的 job，都必须具备 workspace 的全部 path 依赖**。
+  - **H2 措辞订正（运维复核）**：「递归会拉一个体量极大的 tc39/test262」这个理由**不成立**
+    （`update = none` → git 不会去更新该子模块 → 递归也不会拉它）；
+    **正确理由**：v0.14.0 **根本没有构建必需的子模块** → 递归纯属多余。**结论不变**（不带 `--recurse-submodules`）。
+  - **第九轮（前端第八轮：三处宿主已落 + 句柄数 27→32）**：
+    - **采纳前端的两点决策**：① 元信息行 id 用 **`preview_host_*`** 前缀（与 D12-11 的 id 唯一性规则一致）；
+      ② `assets/preview.uix` 的 `preview_body` 也改 **`<custom>`**（按同一条判定规则 + D06-1 图片统一由 Rust blit）→ **架构侧确认**。
+    - **架构侧复核**：按「剥注释后正则计数」实测 `main.uix` **26** 个 id、`preview.uix` **6** 个、`about.uix` **0** 个
+      → **合计 32**，与前端报的一致；契约里的「27」已全部改为「32」。
+    - ⚠️ **给前端留的一条**：`assets/preview.uix` 头注释里**同时**写着两段互相矛盾的话 ——
+      「四、preview_body 是图片位 → Rust blit → `<custom>`」与「五、…由 core-ui 控件填充（`<gh-img-view>` 等）→ 保持 `<div>`」，
+      而元素实际是 `<custom>` → **注释与实现自相矛盾**，QA 的资产复核会挑出来；
+      且「`<gh-img-view>` 填充」与 `SPEC.md` §8 第 7 条（不实现瓦块金字塔喂数）冲突、**不可执行** → 请把第五段改成与实现一致的表述。
+- 2026-11-13 **第十轮（QA 第五轮：口径⑤ 的四条证据 + 三条新证据 + 提请裁注入位置 + 行号漂移）**：
+  - **注入位置的正式裁定（QA 提请）→ 选「甲A：在源码最前插入」**（与上一轮契约改动一致，本轮**补全前提并定案**）：
+    - 理由：① 无条件成立（不依赖「`.uix` 没有 `:root`」这个巧合）；② Rust 侧代码量相同（prepend/append 都是一次 concat）；
+      ③ 证据 C（SFC 顶层标签**不限顺序**，`sfc_parser.cpp:252-297`）保证语法合法；
+      ④ 唯一残留前提 = 证据 B（`<link>` CSS 里不能有 `:root`）→ 本项目零 `<link>`，Rust 自检顺手断言。
+    - **否掉「甲B：保留末尾追加 + 靠门禁禁止 `.uix` 出现 `:root`」**：把正确性押在约定上，而违约代价是**静默失效**。
+    - ⇒ **口径⑤的完整表述**（比之前更严）：「注入的 `:root` 必须是**整张样式表**里的第一个 `:root`；
+      整张样式表 = **`<link>` CSS（在前，`page_api.cpp:271-277`）+ inline `<style>`（在后）**」。
+  - **三条新证据全部复核成立并写进契约**：
+    **A** `page_api.cpp:333-350`（各 `<style>` 块的规则依次 push 进**同一张** `sheet.rules`）→「源码里第一个 `:root`」==「`sheet.rules` 里第一个 `:root`」→ 口径**可写成断言**；
+    **B** `page_api.cpp:271-277`（`<link>` 的 CSS **排在** inline `<style>` **之前**）→ 口径的完整前提要含「`<link>` CSS 里无 `:root`」；
+    **C** `sfc_parser.cpp:252-297`（顶层标签不限顺序）→ **源码最前插入**语法合法。
+  - **D10 的三条源码级补强（QA 补证，架构侧复核确认 → 策略依据更硬）**：
+    ① `CollectVarsWithTheme`（`compiler.cpp:1578-1590`）用户 `:root` 在前 + 库 token 带 `has()` 守卫补后 ⇒ **用户 `:root` 赢库默认**；
+    ② `RebuildThemeVars`（`compiler.cpp:1647-1703`）切模式时 erase+重写 34 个库键 ⇒ 用户对库 token 的覆盖**会被清空** ⇒ **`--app-*` 前缀策略依据成立**；
+    ③ `RefreshThemeStyles`（`page_state.cpp:688-702`）只 `RebuildThemeVars`、**不重新采集 `:root`** ⇒ 切主题后 `--app-*` **仍是旧模式的值** ⇒ **「切主题必须重建页面」是必需的，不是可选的**。
+  - **行号漂移修正（P3）**：`LookupVar` 实测在 **`value.cpp:572-579`**（此前写 572-581）→ `spec/**` + `DECISIONS.md` **共 3 处已改**；
+    `assets/themes.json:14`、`docs/12:277/289/396/532/541`、`docs/13:33` 属**前端 / QA 的文件域**，由他们自行改（QA 已在报告里列出）。
+  - **前端复核**：① `assets/themes.json` 两处注记**由前端自己改**（架构侧不再动该文件）；
+- 2026-11-13 **第十一轮（QA 第六轮：S13 落地 + 门禁执行契约 + 运维 P0 闭环 + id 清单门禁）**：
+  - **S13 已落地**：`scripts/gates/s13_token_namespace_check.py`（QA 新建，独立脚本）——
+    逐字口径实现 + **负控已证**（注入 6 类缺陷 ⇒ EXIT=1，逐条带 `文件:行`）。
+    **QA 的两条实现决定，架构侧采纳**：
+    ① **独立成脚本**，不塞进 `qa_uix_verify.py` —— S13 是**契约门禁**（有独立编号、会被里程碑与 CI 契约引用），
+    独立脚本可被 CI **单点调用**、退出码自洽；与「资产质量门」职责不同、互不依赖
+    （`.uix` 禁 `var(--app-accent)` 与 `qa_uix_verify.py` 断言 16 **有意重叠** → 两个独立执行器，一个失败不掩盖另一个）。
+    ② **① 做成【34 个名字的名单】**，不做【命名空间不相交】—— 项目 token 是 `themes.json` 里**显式枚举**的一组名字，
+    不是靠前缀推导的命名空间 → 「前缀 vs 库 token 名」这个判据是**空的**；
+    S13 要挡的真实失败模式是「**把库 token 名误抄进项目 token 集**」→ **只有成员判定挡得住**。
+    脚本每次运行都打印这 34 个名字（便于与上游 `compiler.cpp:1648-1658` 逐字 diff），
+    **条数 ≠ 34 直接 FAIL**（上游升级后名单没同步 ⇒ S13 会漏判，必须让门禁自己先炸）。
+    ★ **S13 的三条「附加」检查也纳入契约**（不改四条逐字口径，各自独立标注）：
+    **A** token 名形状 `--app-[a-z0-9-]+`（= Rust 自检断言 3 的静态对应，两侧合起来才闭环）；
+    **B** `themes.json` 的 **light/dark 键集必须一致**（= 规则 4「切主题要重注入」的前提；键集不等 ⇒ 切到缺键那侧 ⇒ 该 token 静默回落**库默认色**，不报错）；
+    **C** 库 token 名单**条数 ≠ 34 ⇒ 直接 FAIL**（① 的自保）。
+  - ★ **id 清单门禁落地**（= 上一轮我提的那条）：`scripts/gates/ui_id_manifest_check.py` +
+    期望集文件 **`assets/ui-ids.json`**；四条检查：清单里的 id 都在 `.uix` / `.uix` 里的 id 都在清单 /
+    逐页条数与总数一致 / **同页无重复 id**（= **D12-11**）。
+    **架构侧本地实跑：EXIT=0，报「共 32 个唯一 id，3 页」** —— 与我独立重数（`main.uix` 26 + `preview.uix` 6 + `about.uix` 0）**一致** ✓
+  - ★ **新增 `spec/ci-contract.md` §4.8「门禁执行契约」**（QA 明确请架构侧写措辞）：
+    现状 = `build.yml` **零处**调用 `scripts/gates/**` → **脚本都在、CI 一步都不跑** → 按
+    `mechanical-gates.md`「没有执行器的规则只是建议」→ **等于没有门禁**。
+    契约内容：五个脚本（**S13 / id 清单 / S7' 导出面 / 资产质量三支**）的**逐条命令**、
+    **每门禁一个独立 step**、**退出码非 0 ⇒ job 失败（fail-stop，禁止 `|| true` / `continue-on-error`）**、
+    **按 job 归属落位**（`rust` job 跑资产类；S7' 需要 DLL → 放 `package` job）、
+    **门禁必须零第三方依赖**（否则「装依赖」会成为新的失败点）。
+    → 同步：M0 验收新增 **V0.16「门禁在 CI 里真的被执行」**；`spec/crate-layout.md` 门禁表补 S13 与 id 清单两行的脚本路径。
+  - **`<link>` 残留缺口已写进契约**（QA 提出，架构侧复核成立）：
+    「顶层块顺序无关」这句话**只对 inline `<style>` 成立** —— `<link>` 引的 CSS 由 `ResolveLinkBlocks` 定位，
+    **恒排在 inline 之前**，与它在源码里的位置无关 → `<link>` 的 CSS 里若有 `:root`，注入值仍会输。
+    → `spec/ffi-core-ui.md` §4.3.2.1 的形态甲说明已加限定 + 显式提示；本项目零 `<link>` → 前提成立。
+  - **运维 P0 闭环** ✅：`package` job 已补 `zsui` 检出（`build.yml:359-380`，注释块 `:363-368` 写明推理）；
+    根目录**无 `.gitmodules`** → 印证 H2 的订正（「v0.14.0 没有构建必需的子模块」）。
+- 2026-11-13 **第十二轮（契约与 D15~D20 对齐 + QA 第六轮门禁落地）**：
+  - **按交付总监新落的 D15~D20 同步契约**（架构侧只改 Spec，不改 `build.yml`）：
+    - **D15-F1 的「注入位置」作废**（`spec/ffi-core-ui.md` §4.3.2.1 顶部已注明）—— 它写的「插进已有 `<style>` 块的**最后一行** `</style>` 之前」
+      在 **first-wins** 下仍会被页面自己的 `:root` 抢先 → 位置一律按 **D20 甲（源码最前面插入）**；F1 其余部分（只允许 `--app-*`）**有效**。
+    - **D16（戳记分期）** 写进 `spec/ffi-core-ui.md` §5.5 与 `spec/ci-contract.md` §4.2/§4.6b：
+      **M0 过渡 CI 代写 + 必须机器断言** → **M1 改 Rust `build.rs` 产出、CI 只校验**；戳记内容 = **单行 SHA**（不带 VERSION）。
+    - **D17（CI 日志截断）** 写进 `spec/ci-contract.md` **§5.0（置顶）** —— 这是「core-ui 编不出来」的最可能真因：
+      `shell: pwsh` 注入 `$ErrorActionPreference='stop'` × PS7.4+ 的 `$PSNativeCommandUseErrorActionPreference=$true`
+      ⇒ clang-cl **只要往 stderr 写一行 warning** 就被判失败 → `Tee-Object` 停 → **真实诊断从未落盘**；
+      修法 = core-ui job 第一行 `$ErrorActionPreference='Continue'` + `$PSNativeCommandUseErrorActionPreference=$false`；
+      annotation 正则 `-match` → **`-cmatch`**（原正则不区分大小写 → 把含 `ERROR` 的 CMake 缓存变量全命中、占满 10 条配额，把真错误挤掉）。
+      **教训写进契约**：CI 里「日志看不到」不是日志不存在 → **先证明管道没被截断**，再谈编译错误。
+    - **D18（门禁在 CI 里执行）** → 新增 `spec/ci-contract.md` **§4.8「门禁执行契约」**：
+      五个脚本的**逐条命令**、**每门禁一个独立 step**、**退出码非 0 ⇒ job 失败（fail-stop）**、**`::error::` 暴露是哪一条**、
+      **按 job 归属落位**（资产类进 `rust` job；**S7' 需要 DLL → 进 `package` job**）、**门禁零第三方依赖**、
+      **解析 `.uix` 的 id 必须先剥 HTML 注释**（注释里的 `→ <custom id="preview_image">` 会被裸正则误判成「重复 id」）。
+    - **D19（S7' 基准）** → `spec/ci-contract.md` §3.3 第 20 条改写：基准 = **同一 checkout 的 `src/` 的 `UI_API` 定义集**
+      （不用 `docs/05` 的本机 346 基线 —— 跨版本只会得到「版本漂移」；不用头文件 —— 上游漏声明 12 个符号会被误判成 unexpected；
+      `ui_dialog` 头文件有、源码无 → **容忍并报告**，不静默放宽）。
+  - **QA 第六轮的两条实现决定，架构侧采纳**（S13 独立成脚本 + ① 做成 34 个名字的**名单**）：
+    理由分别是「S13 是契约门禁、需可单点调用且退出码自洽」与「项目 token 是显式枚举的名字集、不是命名空间 → 前缀判据是空的，
+    只有成员判定挡得住『把库 token 名误抄进项目 token 集』」。**S13 的三条附加检查（A 名字形状 / B light-dark 键集一致 / C 名单条数≠34 即 FAIL）也已入契约。**
+  - **架构侧本地实跑（只读）**：五个门禁脚本全部 **EXIT=0**；`ui_id_manifest_check.py` 报「共 **32** 个唯一 id，3 页」
+    —— 与架构侧独立重数（`main.uix` 26 + `preview.uix` 6 + `about.uix` 0）**一致** ✓
+  - **`<link>` 残留缺口入契约**：「顶层块顺序无关」**只对 inline `<style>` 成立** —— `<link>` 的 CSS 恒排在 inline 之前
+    （`page_api.cpp:271-277`）→ `<link>` 的 CSS 里若有 `:root`，注入值仍会输；本项目零 `<link>` → 前提成立（Rust 自检断言 2 会查）。
+  - **运维 P0 闭环** ✅：`package` job 已补 `zsui` 检出；根目录无 `.gitmodules` → 印证 H2 订正。
