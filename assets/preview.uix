@@ -1,0 +1,32 @@
+<window title="预览" width="320" height="600">
+  <!--
+    UI design v2: collapsible preview pane, see docs/07-UI-DESIGN-WINUI3.md.
+
+    D-15: static preview pane layout only. No event attributes, no scripts with
+    business logic. Rust owns channel selection, decoding and buffer release.
+    GuoheView.exe is NOT used here; the priority channel is the in-DLL
+    ui_gh_img_view_* family (architecture 6.3), with bitmap and text fallbacks.
+  -->
+  <style>
+    window { background: var(--sidebar-bg); color: var(--text); }
+    .preview-toolbar { height: 32px; background: var(--toolbar-bg); }
+    .preview-title { padding: 8px; font-weight: 600; }
+    .preview-body { flex: 1; padding: 8px; }
+    .preview-hint { padding: 8px; color: var(--text-secondary); }
+    .preview-collapsed { width: 0px; }
+    .preview-state { padding: 8px; color: var(--info-fg); }
+  </style>
+  <template>
+    <vbox>
+      <hbox class="preview-toolbar">
+        <text id="preview_title" class="preview-title" text="预览" />
+      </hbox>
+      <separator />
+      <panel id="preview_body" class="preview-body" />
+      <text id="preview_hint" class="preview-hint" text="选中单个文件以预览" />
+      <text id="preview_channel" class="preview-hint" />
+      <text id="preview_size" class="preview-hint" />
+      <text id="preview_state" class="preview-state" />
+    </vbox>
+  </template>
+</window>

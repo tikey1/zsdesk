@@ -1,0 +1,32 @@
+<window title="关于 tabbed_files" width="520" height="420">
+  <!--
+    D-02-C / R2-a / R2-b: third-party component list, readable at runtime.
+    Static text only. D-15: no event attributes, no business scripts.
+    ASCII verification markers (for scripts/verify.ps1 check 05):
+    R2-a / Branch A / ghboke/core-ui / 1.9.0.346 / MIT / custom build / license scope confirmed.
+  -->
+  <style>
+    window { background: var(--content-bg); color: var(--text); }
+    .heading { padding: 12px; font-size: 16px; font-weight: 600; }
+    .row { padding: 4px 12px; color: var(--text-secondary); }
+  </style>
+  <template>
+    <vbox>
+      <text class="heading" text="tabbed_files 1.2.3" />
+      <text class="row" text="单进程 · Core UI · Rust 原生标签页文件管理器" />
+      <separator />
+      <text class="row" text="Core UI 1.9.0.346 — MIT — https://github.com/ghboke/core-ui" />
+      <text class="row" text="随附版本为 GuoheView 定制构建（custom build）：含 ui_gh_img_view_* 等专有扩展导出" />
+      <text class="row" text="许可覆盖已确认：上游为标准 MIT（无附加限制），定制构建属其衍生修改，可随包分发" />
+      <text class="row" text="lunasvg — MIT — 内嵌于 core-ui.dll — SVG 光栅化" />
+      <text class="row" text="QuickJS-NG — 内嵌于 core-ui.dll — 仅求值静态布局与主题 token" />
+      <text class="row" text="windows crate 0.61.3 — MIT / Apache-2.0 — 仅 FFI 绑定，不分发二进制" />
+      <text class="row" text="VC++ 运行库 / UCRT — R2-b Branch A（系统已装）— 不随附，由系统 System32 提供" />
+      <text class="row" text="GuoheView.exe — 外部可选程序 — 不随附、不写注册表、不接管文件关联" />
+      <text class="row" text="ghde.dll — 可选增强，默认关闭；guohe-view-thumb.dll — 不使用" />
+      <text class="row" text="无 Chromium / WebView2 / CEF / Electron / V8 / Node 运行时" />
+      <separator />
+      <text class="row" text="致谢 ZSDesk — MIT — https://github.com/qiu7824/zsdesk — 借鉴其 CI / 打包实践" />
+    </vbox>
+  </template>
+</window>

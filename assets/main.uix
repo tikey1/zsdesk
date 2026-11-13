@@ -1,0 +1,83 @@
+<window title="tabbed_files" width="1200" height="800">
+  <!--
+    UI design v2 (Windows 10 / WinUI 3 style) - see docs/07-UI-DESIGN-WINUI3.md.
+
+    D-15 / architecture 3.2: STATIC LAYOUT ONLY.
+    This file declares layout, styles and Fluent 2 theme tokens.
+    It declares NO interaction callbacks, NO event forwarding, NO business logic.
+    Every interaction callback is registered in Rust via the Core UI pure C API
+    (src/app/* + src/ui/*). List rows are NEVER created here; the file list
+    is drawn by ui_custom_on_draw from the Rust EntryStore (architecture 4).
+    Widget ids below are consumed by Rust through the pure C API mount hook;
+    ids added by design v2 are inert until their Rust side is implemented.
+
+    First release is READ-ONLY: the command row intentionally contains no
+    create / rename / delete / clipboard commands.
+  -->
+  <script>
+    const themeToken = "fluent2";
+  </script>
+  <style>
+    window { background: var(--bg); color: var(--text); font-family: "Segoe UI Variable", "Segoe UI"; }
+    .titlebar { height: 32px; background: var(--toolbar-bg); }
+    .app-title { padding-left: 12px; font-size: 13px; color: var(--text-secondary); }
+    .global-search { width: 280px; height: 26px; background: var(--content-bg); }
+    .tabbar { height: 36px; background: var(--toolbar-bg); }
+    .tab-active { color: var(--text); border-bottom: 2px solid var(--accent); }
+    .commandbar { height: 40px; background: var(--toolbar-bg); }
+    .cmd-button { width: 32px; height: 32px; }
+    .cmd-group { width: 8px; }
+    .addressbar { height: 36px; background: var(--content-bg); }
+    .breadcrumb { flex: 1; height: 26px; color: var(--text); }
+    .address { flex: 1; height: 26px; background: var(--content-bg); }
+    .search { width: 220px; height: 26px; background: var(--content-bg); }
+    .main-area { flex: 1; }
+    .nav-host { width: 220px; background: var(--sidebar-bg); }
+    .list-host { flex: 1; background: var(--content-bg); }
+    .preview-host { width: 320px; background: var(--sidebar-bg); }
+    .infobar { height: 0px; background: var(--info-bg); }
+    .infobar-visible { height: 36px; background: var(--info-bg); color: var(--text); }
+    .statusbar { height: 28px; background: var(--toolbar-bg); }
+    .status-segment { padding-left: 12px; color: var(--text-secondary); }
+    .divider { background: var(--divider); }
+  </style>
+  <template>
+    <vbox>
+      <hbox id="titlebar_host" class="titlebar">
+        <text class="app-title" text="tabbed_files" />
+        <text-input id="global_search" class="global-search" />
+      </hbox>
+      <hbox id="tab_host" class="tabbar">
+        <label id="tab_placeholder" text="标签页由 Rust 侧 TabManager 提供" />
+      </hbox>
+      <separator class="divider" />
+      <hbox id="command_host" class="commandbar">
+        <label id="nav_hint" text="后退 前进 上级 刷新 · 查看 排序 预览" />
+      </hbox>
+      <separator class="divider" />
+      <hbox id="address_host" class="addressbar">
+        <panel id="breadcrumb" class="breadcrumb" />
+        <text-input id="address" class="address" />
+        <text-input id="search" class="search" />
+      </hbox>
+      <separator class="divider" />
+      <hbox id="infobar_host" class="infobar" />
+      <hbox class="main-area">
+        <panel id="nav_host" class="nav-host" />
+        <vseparator class="divider" />
+        <panel id="list_host" class="list-host" />
+        <vseparator class="divider" />
+        <panel id="preview_host" class="preview-host" />
+      </hbox>
+      <separator class="divider" />
+      <hbox id="status_host" class="statusbar">
+        <text id="status_item_count" class="status-segment" />
+        <text id="status_selected" class="status-segment" />
+        <text id="status_text" class="status-segment" />
+        <text id="status_progress" class="status-segment" />
+        <text id="status_thumb_cache" class="status-segment" />
+        <text id="status_image_channel" class="status-segment" />
+      </hbox>
+    </vbox>
+  </template>
+</window>

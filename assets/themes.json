@@ -1,0 +1,42 @@
+{
+  "schema": "fluent2-theme-tokens/v1",
+  "note": "静态主题 token，编译期经 include_bytes! 内嵌；D-15：仅样式数据，无脚本、无事件。v2 界面设计新增 hover / pressed / selection / 语义背景色，见 docs/07-UI-DESIGN-WINUI3.md。",
+  "light": {
+    "--bg": "#F3F3F3",
+    "--content-bg": "#FFFFFF",
+    "--sidebar-bg": "#FBFBFB",
+    "--toolbar-bg": "#F7F7F7",
+    "--text": "#1B1B1B",
+    "--text-secondary": "#616161",
+    "--divider": "#E0E0E0",
+    "--accent": "#2563EB",
+    "--hover": "#EDEDED",
+    "--pressed": "#E5E5E5",
+    "--selection-bg": "#E6F1FB",
+    "--info-bg": "#EFF6FF",
+    "--warning-bg": "#FFF7E6",
+    "--danger-bg": "#FDECEC",
+    "--info-fg": "#185FA5",
+    "--warning-fg": "#854F0B",
+    "--danger-fg": "#A32D2D"
+  },
+  "dark": {
+    "--bg": "#202020",
+    "--content-bg": "#2B2B2B",
+    "--sidebar-bg": "#252525",
+    "--toolbar-bg": "#2B2B2B",
+    "--text": "#F5F5F5",
+    "--text-secondary": "#B3B3B3",
+    "--divider": "#3D3D3D",
+    "--accent": "#60A5FA",
+    "--hover": "#333333",
+    "--pressed": "#3D3D3D",
+    "--selection-bg": "#1B3A5C",
+    "--info-bg": "#1B2A3A",
+    "--warning-bg": "#3A2E18",
+    "--danger-bg": "#3A2020",
+    "--info-fg": "#85B7EB",
+    "--warning-fg": "#FAC775",
+    "--danger-fg": "#F09595"
+  }
+}
