@@ -18,7 +18,7 @@
 
 ## 上游基线
 
-- 提交：`6aec0c2 Release ZSDesk 0.3.11 fixes`
+- 上游基线提交：`6aec0c2 Release ZSDesk 0.3.11 fixes`
 - 语言：Rust 为主，少量 C++ / C / PowerShell / C#
 - 许可：MIT，`Copyright (c) 2026 ZSDesk contributors`；上游 `LICENSE` 与 `THIRD-PARTY-NOTICES.txt` 原样保留
 - 构建：`cargo test --workspace --release --locked`，Rust 1.89+ / CI 固定 1.99.0；Windows x64
