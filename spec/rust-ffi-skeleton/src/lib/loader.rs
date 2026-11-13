@@ -91,9 +91,10 @@ macro_rules! define_required_api {
                     $( $field: {
                         // 符号名带结尾 NUL：libloading 的 `cstr_cow_from_bytes`
                         // 会直接借用这块内存传给 `GetProcAddress`，零分配。
-                        let sym: libloading::Symbol<$ret> = lib
-                            .get(concat!($sym, "\0").as_bytes())
-                            .map_err(|_| MissingSymbol { name: $sym })?;
+                        let sym: libloading::Symbol<$ret> = unsafe {
+                            lib.get(concat!($sym, "\0").as_bytes())
+                                .map_err(|_| MissingSymbol { name: $sym })?
+                        };
                         *sym
                     }, )*
                 })
@@ -117,10 +118,11 @@ macro_rules! define_optional_api {
         impl OptionalApi {
             unsafe fn bind(lib: &libloading::Library) -> Self {
                 OptionalApi {
-                    $( $field: lib
-                        .get::<$ret>(concat!($sym, "\0").as_bytes())
-                        .ok()
-                        .map(|s| *s), )*
+                    $( $field: unsafe {
+                        lib.get::<$ret>(concat!($sym, "\0").as_bytes())
+                            .ok()
+                            .map(|s| *s)
+                    }, )*
                 }
             }
         }
@@ -220,6 +222,7 @@ define_required_api! {
 
     // ---- 页面 ----
     page_load_file: unsafe extern "C" fn(*const u16) -> UiPage = "ui_page_load_file",
+    page_load_string: unsafe extern "C" fn(*const u8) -> UiPage = "ui_page_load_string",
     page_destroy: unsafe extern "C" fn(UiPage) = "ui_page_destroy",
     page_reload: unsafe extern "C" fn(UiPage) -> i32 = "ui_page_reload",
     page_root: unsafe extern "C" fn(UiPage) -> UiWidget = "ui_page_root",
@@ -284,25 +287,51 @@ define_required_api! {
 }
 
 define_optional_api! {
-    // 本机 GuoheView 目录的 core-ui.dll **有**、仓库 main **没有**（实测 12 个中的 4 类）。
-    // 缺失时对应能力降级，不得崩溃。
-    image_gdi_create: unsafe extern "C" fn(UiWidget, UiWindow, *const core::ffi::c_void, i32, i32, i32) -> i32 = "ui_image_gdi_create",
-    image_gdi_set_pixels: unsafe extern "C" fn(UiWidget, UiWindow, *const core::ffi::c_void, i32, i32, i32) -> i32 = "ui_image_gdi_set_pixels",
-    image_gdi_get_pixels: unsafe extern "C" fn(UiWidget, UiWindow, *mut *mut core::ffi::c_void, *mut i32, *mut i32) -> i32 = "ui_image_gdi_get_pixels",
-    image_gdi_release: unsafe extern "C" fn(UiWidget) = "ui_image_gdi_release",
-    image_gdi_invalidate: unsafe extern "C" fn(UiWidget) = "ui_image_gdi_invalidate",
-    image_gdi_set_zoom: unsafe extern "C" fn(UiWidget, f32) = "ui_image_gdi_set_zoom",
-    image_gdi_get_zoom: unsafe extern "C" fn(UiWidget) -> f32 = "ui_image_gdi_get_zoom",
-    image_gdi_width: unsafe extern "C" fn(UiWidget) -> i32 = "ui_image_gdi_width",
-    image_gdi_height: unsafe extern "C" fn(UiWidget) -> i32 = "ui_image_gdi_height",
-    image_view_gdi: unsafe extern "C" fn() -> UiWidget = "ui_image_view_gdi",
-    image_evict_tile: unsafe extern "C" fn(UiWidget, i32, i32) = "ui_image_evict_tile",
-    flush_gpu: unsafe extern "C" fn() = "ui_flush_gpu",
-
-    // 仓库 main **有**、本机 DLL **没有**（实测 2 个）。
-    // 缺失时用「资源目录注册 + 运行时读文件」的降级路径。
-    embed_binary: unsafe extern "C" fn(*const core::ffi::c_void, usize, *const u8) -> i32 = "ui_core_embed_binary",
+    // `ui_dialog`：头文件有声明（`UI_API UiWidget ui_dialog(void);`），
+    // 但**本机 core-ui.dll 没有这个导出**（实测，`docs/05-COREUI-EXPORTS.txt` 里查无此符号）。
+    // → 必须当可选能力，缺失时用 `ui_msgbox` 模态对话框兜底。
+    //
+    // 注意：`ui_core_embed_binary` **不是 C API** —— 它是 CMake 辅助函数
+    // （`cmake/embed_binary.cmake` 的 `ui_core_embed_binary(TARGET FILE ... OUT ... VAR ...)`），
+    // 用来生成内嵌字节的 .h 文件。从来不会出现在任何 DLL 的导出表里，
+    // 因此**不在绑定清单里**。发布态的资源注册走 `ui_asset_register_blob`。
     dialog: unsafe extern "C" fn() -> UiWidget = "ui_dialog",
+}
+
+/// 「本机 DLL 独有」的 12 个符号（实测：`docs/05-COREUI-EXPORTS.txt`）。
+///
+/// **这些符号在 `include/ui_core.h` 里没有声明**，签名未知 →
+/// **不得编造签名、不得绑定、不得调用**（ABI-NOTES 硬规则 3）。
+///
+/// 这里只做**存在性探测**（`GetProcAddress` 返回非空即存在），
+/// 用于诊断报告里告诉用户「你本机这份 core-ui.dll 带 GDI 位图能力」。
+/// 探测用占位签名 `unsafe extern "C" fn()`；libloading 的
+/// `ensure_compatible_types` 只比较 size/align，不校验具体签名，
+/// 而我们**永远不会调用**这个指针。
+pub const LOCAL_ONLY_SYMBOLS: &[&str] = &[
+    "ui_flush_gpu",
+    "ui_image_evict_tile",
+    "ui_image_view_gdi",
+    "ui_image_gdi_set_file",
+    "ui_image_gdi_set_pixels",
+    "ui_image_gdi_set_parent",
+    "ui_image_gdi_set_zoom",
+    "ui_image_gdi_get_zoom",
+    "ui_image_gdi_width",
+    "ui_image_gdi_height",
+    "ui_image_gdi_fit",
+    "ui_image_gdi_clear",
+];
+
+/// 仅探测符号存在性，**绝不调用**。
+///
+/// # Safety
+/// `lib` 必须是已成功加载的 DLL。
+unsafe fn probe_symbol(lib: &libloading::Library, name: &str) -> bool {
+    // 占位签名：只用来拿到地址。libloading 的 `ensure_compatible_types`
+    // 只比较 size 与 align（函数指针均为 8 字节 / align 8），不会校验签名。
+    let sym = unsafe { lib.get::<unsafe extern "C" fn() -> ()>(name.as_bytes()) };
+    sym.is_ok()
 }
 
 /// 已加载的 core-ui 运行时。
@@ -310,6 +339,7 @@ define_optional_api! {
 /// `Drop` 时卸载 DLL。因为 `Api` 里存的是**裸函数指针**，`Drop` 必须在
 /// 没有任何回调在飞、没有任何 widget 存活时执行 —— 由上层 `UiThread`
 /// 保证「先销毁页面与窗口，再释放 CoreUi」。
+#[derive(Debug)]
 pub struct CoreUi {
     /// 必须持有：句柄释放后所有函数指针失效。
     lib: libloading::Library,
@@ -335,13 +365,20 @@ impl CoreUi {
         let api = unsafe { Api::bind(&lib) }.map_err(LoadError::Missing)?;
         // SAFETY: 同上；缺失降级为 None。
         let optional = unsafe { OptionalApi::bind(&lib) };
+        // SAFETY: 只做存在性探测，绝不调用。
+        let local_only = unsafe {
+            LOCAL_ONLY_SYMBOLS
+                .iter()
+                .map(|name| (*name, probe_symbol(&lib, name)))
+                .collect::<Vec<_>>()
+        };
 
         let version = CoreUiVersion::probe(&api);
         let min_build = crate::version::min_build();
         if !version.meets_minimum(min_build) {
             return Err(LoadError::TooOld { found: version, min_build });
         }
-        let capabilities = Capabilities::detect(&optional);
+        let capabilities = Capabilities::detect(&optional, &local_only);
 
         Ok(CoreUi {
             lib,

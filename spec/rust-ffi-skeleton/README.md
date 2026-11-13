@@ -1,4 +1,4 @@
-# `zc-ffi-coreui` 骨架
+# `zsdesk-coreui` 骨架
 
 core-ui C API 的**运行时动态加载**绑定层。这是全仓库唯一允许 `unsafe` 的 crate。
 
@@ -6,9 +6,9 @@ core-ui C API 的**运行时动态加载**绑定层。这是全仓库唯一允�
 
 | 做 | 不做 |
 |---|---|
-| `LoadLibrary` 加载 `core-ui.dll`，建立必需/可选两张符号表 | 不画任何东西（自绘在 `zc-ui`） |
-| 版本协商（`ui_core_version*`）+ 按符号存在性判能力 | 不持有业务状态（状态在 `zc-app`） |
-| UI 线程收敛（`invoke_sync` 封送 + 线程断言） | 不认识 `.uix` 语义（页面装配在 `zc-ui`） |
+| `LoadLibrary` 加载 `core-ui.dll`，建立必需/可选两张符号表 | 不画任何东西（自绘在 `zsdesk-ui`） |
+| 版本协商（`ui_core_version*`）+ 按符号存在性判能力 | 不持有业务状态（状态在 `zsdesk-app`） |
+| UI 线程收敛（`invoke_sync` 封送 + 线程断言） | 不认识 `.uix` 语义（页面装配在 `zsdesk-ui`） |
 | UTF-8 ↔ UTF-16 转换（唯一转换点） | **不反向依赖任何内部 crate** |
 
 ## 文件
@@ -28,7 +28,7 @@ core-ui C API 的**运行时动态加载**绑定层。这是全仓库唯一允�
 ```
 zsdesk-coreui/
 ├── crates/
-│   └── zc-ffi-coreui/     ← 本目录整体搬过来
+│   └── zsdesk-coreui/     ← 本目录整体搬过来
 └── packaging/
     └── core-ui-revision.txt   ← build.rs 会读它
 ```
@@ -61,4 +61,4 @@ zsdesk-coreui/
 
 - `UiWindowConfig` 只声明不使用（MVP 走 `.uix` 的 `<window>` 标签 + `ui_page_open_window(page, NULL)`，
   完全不需要传结构体）。要用之前必须核对 pinned revision 的 `ui_core.h` 实际布局。
-- 没有任何业务封装（不画列表、不读页面状态）。那些在 `zc-ui`。
+- 没有任何业务封装（不画列表、不读页面状态）。那些在 `zsdesk-ui`。

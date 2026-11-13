@@ -78,54 +78,49 @@ impl std::fmt::Display for CoreUiVersion {
 ///
 /// 不用版本号判定，因为实测存在「本机 DLL 更新、仓库 main 更旧」的情况，
 /// 版本号与能力不是单调关系。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
-    /// GDI 位图路径（`ui_image_gdi_*`）—— 本机 DLL 有，仓库 main 无。
-    pub image_gdi: bool,
-    /// `ui_image_view_gdi` —— 本机 DLL 有，仓库 main 无。
-    pub image_view_gdi: bool,
-    /// `ui_image_evict_tile` —— 本机 DLL 有，仓库 main 无。
-    pub image_evict_tile: bool,
-    /// `ui_flush_gpu` —— 本机 DLL 有，仓库 main 无。
-    pub flush_gpu: bool,
-    /// `ui_core_embed_binary` —— 仓库 main 有，本机 DLL 无。
-    pub embed_binary: bool,
-    /// `ui_dialog` —— 仓库 main 有，本机 DLL 无。
+    /// `ui_dialog` 可用（头文件有声明，本机 DLL 缺失 → 缺失时用 `ui_msgbox` 兜底）。
     pub dialog: bool,
+    /// 「本机 DLL 独有」的 12 个符号中**存在**的（只探测，不调用）。
+    pub local_only_present: Vec<&'static str>,
+    /// 「本机 DLL 独有」的 12 个符号中**不存在**的。
+    pub local_only_absent: Vec<&'static str>,
 }
 
 impl Capabilities {
-    /// 依据可选符号表判定。
-    pub fn detect(opt: &OptionalApi) -> Self {
-        let image_gdi = opt.image_gdi_create.is_some()
-            && opt.image_gdi_set_pixels.is_some()
-            && opt.image_gdi_get_pixels.is_some()
-            && opt.image_gdi_release.is_some()
-            && opt.image_gdi_invalidate.is_some()
-            && opt.image_gdi_set_zoom.is_some()
-            && opt.image_gdi_get_zoom.is_some()
-            && opt.image_gdi_width.is_some()
-            && opt.image_gdi_height.is_some();
+    /// 依据可选符号表 + 存在性探测判定。
+    pub fn detect(opt: &OptionalApi, local_only: &[(String, bool)]) -> Self {
+        let mut present = Vec::new();
+        let mut absent = Vec::new();
+        for (name, ok) in local_only {
+            // 名字来自 `loader::LOCAL_ONLY_SYMBOLS`（`'static`），这里只做回查。
+            let name: &'static str = crate::loader::LOCAL_ONLY_SYMBOLS
+                .iter()
+                .copied()
+                .find(|n| *n == name.as_str())
+                .unwrap_or("");
+            if ok {
+                present.push(name);
+            } else {
+                absent.push(name);
+            }
+        }
         Capabilities {
-            image_gdi,
-            image_view_gdi: opt.image_view_gdi.is_some(),
-            image_evict_tile: opt.image_evict_tile.is_some(),
-            flush_gpu: opt.flush_gpu.is_some(),
-            embed_binary: opt.embed_binary.is_some(),
             dialog: opt.dialog.is_some(),
+            local_only_present: present,
+            local_only_absent: absent,
         }
     }
 
     /// 人类可读的能力清单（写进诊断报告与启动日志）。
     pub fn summary(&self) -> String {
-        let mut v = Vec::new();
-        v.push(format!("image_gdi={}", self.image_gdi));
-        v.push(format!("image_view_gdi={}", self.image_view_gdi));
-        v.push(format!("image_evict_tile={}", self.image_evict_tile));
-        v.push(format!("flush_gpu={}", self.flush_gpu));
-        v.push(format!("embed_binary={}", self.embed_binary));
-        v.push(format!("dialog={}", self.dialog));
-        v.join(" ")
+        format!(
+            "dialog={} | 本机独有符号 存在 {} / 缺失 {}",
+            self.dialog,
+            self.local_only_present.len(),
+            self.local_only_absent.len()
+        )
     }
 }
 
@@ -184,7 +179,7 @@ pub unsafe fn c_str_len(ptr: *const u8) -> usize {
         return 0;
     }
     let mut n = 0usize;
-    while *ptr.add(n) != 0 {
+    while unsafe { *ptr.add(n) } != 0 {
         n += 1;
     }
     n

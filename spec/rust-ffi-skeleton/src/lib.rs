@@ -1,4 +1,4 @@
-//! `zc-ffi-coreui` —— core-ui C API 的运行时动态加载绑定层。
+//! `zsdesk-coreui` —— core-ui C API 的运行时动态加载绑定层。
 //!
 //! # 这个 crate 的职责边界
 //!
@@ -10,9 +10,9 @@
 //!
 //! **不做的事**（这些属于上层）：
 //!
-//! - 不画任何东西（文件列表 / 导航树的自绘在 `zc-ui`）；
-//! - 不持有业务状态（状态在 `zc-app`，见 `spec/ffi-core-ui.md` §4 状态归属）；
-//! - 不认识 `.uix` 的语义（页面装配在 `zc-ui`）；
+//! - 不画任何东西（文件列表 / 导航树的自绘在 `zsdesk-ui`）；
+//! - 不持有业务状态（状态在 `zsdesk-app`，见 `spec/ffi-core-ui.md` §4 状态归属）；
+//! - 不认识 `.uix` 的语义（页面装配在 `zsdesk-ui`）；
 //! - 不反向依赖任何内部 crate —— **FFI 层不得反向依赖 UI 业务层**。
 //!
 //! # unsafe 纪律
@@ -84,10 +84,10 @@ pub unsafe fn from_utf16_ptr(ptr: *const u16) -> String {
         return String::new();
     }
     let mut len = 0usize;
-    while *ptr.add(len) != 0 {
+    while unsafe { *ptr.add(len) } != 0 {
         len += 1;
     }
-    from_utf16(std::slice::from_raw_parts(ptr, len))
+    from_utf16(unsafe { std::slice::from_raw_parts(ptr, len) })
 }
 
 /// 借用指针指向的 NUL 结尾 UTF-8 → `&str`。
@@ -99,10 +99,10 @@ pub unsafe fn from_utf8_ptr<'a>(ptr: *const u8) -> &'a str {
         return "";
     }
     let mut len = 0usize;
-    while *ptr.add(len) != 0 {
+    while unsafe { *ptr.add(len) } != 0 {
         len += 1;
     }
-    std::str::from_utf8(std::slice::from_raw_parts(ptr, len)).unwrap_or("")
+    unsafe { std::str::from_utf8(std::slice::from_raw_parts(ptr, len)) }.unwrap_or("")
 }
 
 /// 启动自检报告。写进诊断日志，也写进「关于」对话框。

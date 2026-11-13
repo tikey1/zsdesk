@@ -70,7 +70,7 @@ unsafe extern "C" fn task_trampoline(ud: *mut std::ffi::c_void) {
 }
 
 /// 跨线程句柄。可 `Copy`，可交给工作线程。
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct UiHandle {
     /// 从 UI 线程拷出来的封送函数指针，工作线程调用它时不需要解引用 `CoreUi`。
     invoke_sync: UiInvokeCallback,
@@ -141,6 +141,7 @@ impl UiHandle {
 ///
 /// 第 5 步的顺序不可换：工作线程还可能在 `invoke_sync` 里排队，
 /// 而 `invoke_sync` 在 `ui_run()` 返回后无人处理。
+#[derive(Debug)]
 pub struct UiThread {
     core: CoreUi,
     window: UiWindow,

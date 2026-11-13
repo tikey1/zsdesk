@@ -301,6 +301,37 @@ zsdesk  main = 6aec0c2a82acabdc80251c9ccb0e7637bbab6f4f
 
 ---
 
+## 7.11 复核修正（2026-11-13 晚，由 PM 与 QA 独立复核发现）
+
+> 本节**修正**前面 §7.1 / §7.9 的表述错误。**冲突时以本节为准。**
+
+### 修正 1：本机 core-ui.dll 是 **1.9.0.346**，不是 345
+- PE 版本资源 `FileVersionRaw = 1.9.0.346`；DLL 内嵌 UTF-16LE 字符串 `1.9.0.346`（`1.9.0.345` 不存在）→ 双重确认。
+- 上游 `VERSION` / `version.json` / pinned CMakeLists 均为 **345**。
+- **影响**：本机 DLL（346）比 pinned revision（345）**新一个 build**；CI 从源码构建的产物是 345。§7.1 与 §7.9 里「与仓库一致」的表述作废。
+- **对 G2 门禁无影响**：门禁比对的是「构建产物 ↔ 同一次 checkout 的 `core-ui/VERSION`」，两者同源，必然一致。
+
+### 修正 2：「12 个符号是 DLL 私有扩展」**不成立**
+- 对 pinned revision `1840d689` 全 `src/` 做 `UI_API` 扫描得 **567 个 `ui_*`**，与本机 DLL 的 567 个**双向差集为空**。
+- 那 12 个（`ui_image_gdi_*` 等）是**上游头文件漏声明、源码里有定义**（`src/ui/ui_api.cpp:1691-1741`），**不是私有扩展**。
+- 反向差集只有 **1 个**：`ui_dialog` —— 头文件有声明，但源码自 build 158 已删除。
+- **影响**：D08「12 个只探测不绑定」可**放宽为可正常绑定**；能力协商的判据应从「按版本号」升级为「**按实测符号集**」。
+
+### 修正 3：core-ui **没有** Mica / Acrylic / 高对比度 / UIA 入口
+- `src/ui/ui_window.cpp` 的 `DwmSetWindowAttribute` 只用于 `TRANSITIONS_FORCEDISABLED` 与圆角偏好；`mica` / `acrylic` / `backdrop` **零命中**。
+- `src/ui/theme.h` 的 `HighContrast` / `AppsUseLightTheme` **零命中**。
+- `src/ui/widget.cpp` / `ui_api.cpp` 的 `uia` / `accessibility` / `narrator` **零命中**。
+- **影响**：迁移矩阵把 `theme.rs` 判「改造」并备注「DWM 效果部分保留」——**该备注不成立**。zsdesk 上游自己用 DWM 实现的 Mica（`theme.rs:131-194`）**在 core-ui 方案下会丢失**，需显式记为已知降级。
+
+### 修正 4：标签统计数字（QA 实测）
+原版 `assets/main.uix` 的真实开标签数：`<text>`×**7**、`<text-input>`×**3**、`<hbox>`×7、`<panel>`×4、`<separator>`×4、`<vseparator>`×2、`<label>`×2、`<vbox>`×1。
+先前 `docs/11` §2 记的 `<text>`×10 / `<text-input>`×2 是**把闭合标签也计入**所致，已回填。
+
+### 修正 5：`ui_debug_*` 计数
+本机 `core-ui.dll` 的 `ui_*` 导出 **567** 个，其中 `ui_debug_*` 为 **72**（先前记为 71）。
+
+---
+
 ## 6. 未核实项（不猜，需用户或实测补齐）
 
 - ghde.dll 的**具体 ABI 签名**（本机无头文件，仓库亦未公开）——需实机导出表反推或用户方提供 SDK。

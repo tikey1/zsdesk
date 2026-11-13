@@ -1,7 +1,7 @@
 # zsdesk → zsdesk-coreui 文件级迁移矩阵
 
 > 契约编号：`ZC-MIG-001`
-> 状态：已定（随 D08 生效）
+> 状态：已定（随 D11 生效）
 > 基线：`qiu7824/zsdesk` @ main，**138 个 `.rs` 文件 / 42,150 行**（实测 `find | xargs cat | wc -l`）
 > 校验工具：`spec/tools/matrix_calc.py`（重跑即可复现本文所有数字）
 
@@ -54,108 +54,108 @@
 
 > 勾选框 = 「这一项已处置完毕」。每项的「新落点」列指向 `spec/crate-layout.md` 的目录树。
 
-### 4.1 `zsdesk-core` → `zc-core`（8 文件 / 1,999 行，**100% 直接复用**）
+### 4.1 `zsdesk-core` → `zsdesk-core`（8 文件 / 1,999 行，**100% 直接复用**）
 
 | ✓ | 上游文件 | 行 | 档 | 新落点 | 备注 |
 |---|---|---:|---|---|---|
-| ☐ | `crates/zsdesk-core/src/lib.rs` | 7 | 直接复用 | `crates/zc-core/src/lib.rs` | 只改 crate 名 |
-| ☐ | `crates/zsdesk-core/src/error.rs` | 34 | 直接复用 | `crates/zc-core/src/error.rs` | |
-| ☐ | `crates/zsdesk-core/src/model.rs` | 6 | 直接复用 | `crates/zc-core/src/model.rs` | |
-| ☐ | `crates/zsdesk-core/src/model/explorer.rs` | 804 | 直接复用 | `crates/zc-core/src/model/explorer.rs` | `ExplorerSession` / `ExplorerTab` / `ShellLocation` / `ExplorerUi` —— **状态归属的权威模型** |
-| ☐ | `crates/zsdesk-core/src/model/desktop.rs` | 794 | 直接复用 | `crates/zc-core/src/model/desktop.rs` | 桌面格子模型 |
-| ☐ | `crates/zsdesk-core/src/model/tab.rs` | 131 | 直接复用 | `crates/zc-core/src/model/tab.rs` | |
-| ☐ | `crates/zsdesk-core/src/model/view.rs` | 163 | 直接复用 | `crates/zc-core/src/model/view.rs` | `FileEntry` / `natural_cmp` / `RequestId` / `VisibleRange` |
-| ☐ | `crates/zsdesk-core/src/path.rs` | 60 | 直接复用 | `crates/zc-core/src/path.rs` | |
+| ☐ | `crates/zsdesk-core/src/lib.rs` | 7 | 直接复用 | `crates/zsdesk-core/src/lib.rs` | 只改 crate 名 |
+| ☐ | `crates/zsdesk-core/src/error.rs` | 34 | 直接复用 | `crates/zsdesk-core/src/error.rs` | |
+| ☐ | `crates/zsdesk-core/src/model.rs` | 6 | 直接复用 | `crates/zsdesk-core/src/model.rs` | |
+| ☐ | `crates/zsdesk-core/src/model/explorer.rs` | 804 | 直接复用 | `crates/zsdesk-core/src/model/explorer.rs` | `ExplorerSession` / `ExplorerTab` / `ShellLocation` / `ExplorerUi` —— **状态归属的权威模型** |
+| ☐ | `crates/zsdesk-core/src/model/desktop.rs` | 794 | 直接复用 | `crates/zsdesk-core/src/model/desktop.rs` | 桌面格子模型 |
+| ☐ | `crates/zsdesk-core/src/model/tab.rs` | 131 | 直接复用 | `crates/zsdesk-core/src/model/tab.rs` | |
+| ☐ | `crates/zsdesk-core/src/model/view.rs` | 163 | 直接复用 | `crates/zsdesk-core/src/model/view.rs` | `FileEntry` / `natural_cmp` / `RequestId` / `VisibleRange` |
+| ☐ | `crates/zsdesk-core/src/path.rs` | 60 | 直接复用 | `crates/zsdesk-core/src/path.rs` | |
 
-**新增（上游没有）**：`crates/zc-core/src/model/preview.rs` —— 预览请求模型
+**新增（上游没有）**：`crates/zsdesk-core/src/model/preview.rs` —— 预览请求模型
 （当前路径、滚动位置、缩放、瓦块级别、取消令牌）。约 150 行 [估算]。
 
 ---
 
-### 4.2 `zsdesk-platform` → `zc-platform`（2 文件 / 107 行）
+### 4.2 `zsdesk-platform` → `zsdesk-platform`（2 文件 / 107 行）
 
 | ✓ | 上游文件 | 行 | 档 | 新落点 | 备注 |
 |---|---|---:|---|---|---|
-| ☐ | `crates/zsdesk-platform/src/lib.rs` | 3 | 直接复用 | `crates/zc-platform/src/lib.rs` | |
-| ☐ | `crates/zsdesk-platform/src/shell.rs` | 104 | 改造 | `crates/zc-platform/src/shell.rs` | 加 `ShellItemSource` trait（供自绘树枚举虚拟位置）；`IconProvider::file_icon` 返回值从 RGBA 改 **BGRA 预乘**（core-ui 位图格式） |
+| ☐ | `crates/zsdesk-platform/src/lib.rs` | 3 | 直接复用 | `crates/zsdesk-platform/src/lib.rs` | |
+| ☐ | `crates/zsdesk-platform/src/shell.rs` | 104 | 改造 | `crates/zsdesk-platform/src/shell.rs` | 加 `ShellItemSource` trait（供自绘树枚举虚拟位置）；`IconProvider::file_icon` 返回值从 RGBA 改 **BGRA 预乘**（core-ui 位图格式） |
 
 ---
 
-### 4.3 `zsdesk-ui` → `zc-ui`（4 文件 / 1,725 行，**影响最高**）
+### 4.3 `zsdesk-ui` → `zsdesk-ui`（4 文件 / 1,725 行，**影响最高**）
 
 | ✓ | 上游文件 | 行 | 档 | 新落点 | 备注 |
 |---|---|---:|---|---|---|
-| ☐ | `crates/zsdesk-ui/src/lib.rs` | 6 | 重写 | `crates/zc-ui/src/lib.rs` | 模块清单全变（加 `filelist` / `navtree` / `preview` / `shell_page` / `external`） |
-| ☐ | `crates/zsdesk-ui/src/chrome.rs` | 788 | **重写** | 拆到 `crates/zc-ui/src/chrome.rs` + `ui/main.uix` | 窗口几何 / 标题栏 / 命令栏布局：ZSUI 控件模型 → core-ui `<TitleBar>` + `.uix` flex 布局 |
-| ☐ | `crates/zsdesk-ui/src/menus.rs` | 644 | 改造 | `crates/zc-ui/src/menus.rs` + `ui/main.uix` 的 `<menu>` | 菜单**内容与启用规则**保留；**渲染**从 ZSUI 菜单改为 `.uix` 声明式 `<menu>`（core-ui build 75+ 删除了 imperative 菜单构造） |
-| ☐ | `crates/zsdesk-ui/src/theme.rs` | 287 | 改造 | `crates/zc-ui/src/theme.rs` | 令牌**语义角色**保留；**取值**改从 core-ui `ui_theme_*()` 取（DWM 模糊等 core-ui 没有的能力降级为纯色） |
+| ☐ | `crates/zsdesk-ui/src/lib.rs` | 6 | 重写 | `crates/zsdesk-ui/src/lib.rs` | 模块清单全变（加 `filelist` / `navtree` / `preview` / `shell_page` / `external`） |
+| ☐ | `crates/zsdesk-ui/src/chrome.rs` | 788 | **重写** | 拆到 `crates/zsdesk-ui/src/chrome.rs` + `ui/main.uix` | 窗口几何 / 标题栏 / 命令栏布局：ZSUI 控件模型 → core-ui `<TitleBar>` + `.uix` flex 布局 |
+| ☐ | `crates/zsdesk-ui/src/menus.rs` | 644 | 改造 | `crates/zsdesk-ui/src/menus.rs` + `ui/main.uix` 的 `<menu>` | 菜单**内容与启用规则**保留；**渲染**从 ZSUI 菜单改为 `.uix` 声明式 `<menu>`（core-ui build 75+ 删除了 imperative 菜单构造） |
+| ☐ | `crates/zsdesk-ui/src/theme.rs` | 287 | 改造 | `crates/zsdesk-ui/src/theme.rs` | 令牌**语义角色**保留；**取值**改从 core-ui `ui_theme_*()` 取（DWM 模糊等 core-ui 没有的能力降级为纯色） |
 
-**新增（上游没有）**：`crates/zc-ui/src/filelist/**`（8 文件，约 2–4k 行 [估算]）、
-`crates/zc-ui/src/navtree/**`（3 文件，约 800 行 [估算]）。
+**新增（上游没有）**：`crates/zsdesk-ui/src/filelist/**`（8 文件，约 2–4k 行 [估算]）、
+`crates/zsdesk-ui/src/navtree/**`（3 文件，约 800 行 [估算]）。
 
 ---
 
-### 4.4 `zsdesk-windows` → `zc-windows`（32 文件 / 9,205 行）
+### 4.4 `zsdesk-windows` → `zsdesk-windows`（32 文件 / 9,205 行）
 
 | ✓ | 上游文件 | 行 | 档 | 新落点 | 备注 |
 |---|---|---:|---|---|---|
-| ☐ | `crates/zsdesk-windows/build.rs` | 23 | 直接复用 | `crates/zc-windows/build.rs` | `embed-resource` |
-| ☐ | `crates/zsdesk-windows/src/lib.rs` | 23 | 直接复用 | `crates/zc-windows/src/lib.rs` | |
-| ☐ | `crates/zsdesk-windows/src/desktop.rs` | 422 | 直接复用 | `crates/zc-windows/src/desktop.rs` | 桌面 Shell 集成 |
-| ☐ | `crates/zsdesk-windows/src/enumerate.rs` | 167 | 直接复用 | `crates/zc-windows/src/enumerate.rs` | |
-| ☐ | `crates/zsdesk-windows/src/integration.rs` | 703 | 直接复用 | `crates/zc-windows/src/integration.rs` | Shell 集成注册 |
-| ☐ | `crates/zsdesk-windows/src/taskbar.rs` | 85 | 直接复用 | `crates/zc-windows/src/taskbar.rs` | |
-| ☐ | `crates/zsdesk-windows/src/ole/mod.rs` | 3 | 直接复用 | `crates/zc-windows/src/ole/mod.rs` | |
-| ☐ | `crates/zsdesk-windows/src/ole/drop.rs` | 115 | 改造 | `crates/zc-windows/src/ole/drop.rs` | **加 OLE 拖出**：`OleInitialize` + `SHCreateDataObject` + `IDropSource` + `DoDragDrop`（core-ui 明确支持宿主在鼠标回调里起拖） |
-| ☐ | `crates/zsdesk-windows/src/shell/mod.rs` | 28 | 直接复用 | `crates/zc-windows/src/shell/mod.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/commands.rs` | 302 | 直接复用 | `crates/zc-windows/src/shell/commands.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/file_transfer.rs` | 344 | 直接复用 | `crates/zc-windows/src/shell/file_transfer.rs` | `IFileOperation` —— **D04 的核心复用点** |
-| ☐ | `crates/zsdesk-windows/src/shell/file_transfer_tests.rs` | 200 | 直接复用 | `crates/zc-windows/src/shell/file_transfer_tests.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/icons.rs` | 467 | 直接复用 | `crates/zc-windows/src/shell/icons.rs` | `IShellItemImageFactory` → BGRA 预乘（**改一处转换，不改结构**） |
-| ☐ | `crates/zsdesk-windows/src/shell/icons_alpha_tests.rs` | 99 | 直接复用 | `crates/zc-windows/src/shell/icons_alpha_tests.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/notify.rs` | 72 | 直接复用 | `crates/zc-windows/src/shell/notify.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/pidl.rs` | 67 | 直接复用 | `crates/zc-windows/src/shell/pidl.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/search.rs` | 52 | 直接复用 | `crates/zc-windows/src/shell/search.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/shell_item.rs` | 385 | 直接复用 | `crates/zc-windows/src/shell/shell_item.rs` | **+ 扩展**：作为自绘导航树的数据源（已知文件夹枚举） |
-| ☐ | `crates/zsdesk-windows/src/shell/shell_item_contract_tests.rs` | 119 | 直接复用 | `crates/zc-windows/src/shell/shell_item_contract_tests.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/events.rs` | 24 | 改造 | `crates/zc-windows/src/shell/events.rs` | ZSUI 窗口消息 → core-ui 回调；桌面格子仍用 Win32 消息 |
-| ☐ | `crates/zsdesk-windows/src/shell/explorer_browser.rs` | 883 | 改造 | 拆：枚举部分 → `zc-windows/src/shell/shell_item.rs`；宿主部分 → **删除** | `IExplorerBrowser` 不能嵌（D04）；但里面的 `IShellItemArray` 枚举与视图状态逻辑要保留 |
-| ☐ | `crates/zsdesk-windows/src/shell/menu.rs` | 1,022 | 改造 | `crates/zc-windows/src/shell/menu.rs` | Shell 右键菜单宿主：保留 `IContextMenu` / `IExplorerCommand` 逻辑，弹出改由 `.uix` `<menu>` 或原生 `TrackPopupMenu` |
-| ☐ | `crates/zsdesk-windows/src/shell/menu_runtime_tests.rs` | 254 | 改造 | `crates/zc-windows/src/shell/menu_runtime_tests.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/new_menu.rs` | 73 | 改造 | `crates/zc-windows/src/shell/new_menu.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/quick_menu.rs` | 61 | 改造 | `crates/zc-windows/src/shell/quick_menu.rs` | |
-| ☐ | `crates/zsdesk-windows/src/shell/view_state.rs` | 312 | 改造 | `crates/zc-windows/src/shell/view_state.rs` | 保留视图状态持久化，去掉 ExplorerBrowser 专属部分 |
-| ☐ | `crates/zsdesk-windows/src/flyout.rs` | 731 | 改造 | `crates/zc-windows/src/flyout.rs` | 弹出菜单宿主：ZSUI → 原生 `HWND` 或 core-ui 菜单 |
-| ☐ | `crates/zsdesk-windows/src/flyout_layout.rs` | 248 | 改造 | `crates/zc-windows/src/flyout_layout.rs` | |
-| ☐ | `crates/zsdesk-windows/src/gfx.rs` | 485 | 改造 | `crates/zc-windows/src/gfx.rs` | Direct2D/DirectWrite 绘制 → core-ui 自绘；**保留** GDI 位图转换（HBITMAP → BGRA） |
-| ☐ | `crates/zsdesk-windows/src/theme.rs` | 221 | 改造 | `crates/zc-windows/src/theme.rs` | DWM 效果部分保留；颜色取值改 core-ui 主题 |
-| ☐ | `crates/zsdesk-windows/src/shell/namespace_tree.rs` | 1,029 | **重写** | 数据源 → `zc-windows/src/shell/shell_item.rs` 扩展；渲染 → `zc-ui/src/navtree/` | `INameSpaceTreeControl` 是子窗口控件，不能嵌（D07 方案 A） |
+| ☐ | `crates/zsdesk-windows/build.rs` | 23 | 直接复用 | `crates/zsdesk-windows/build.rs` | `embed-resource` |
+| ☐ | `crates/zsdesk-windows/src/lib.rs` | 23 | 直接复用 | `crates/zsdesk-windows/src/lib.rs` | |
+| ☐ | `crates/zsdesk-windows/src/desktop.rs` | 422 | 直接复用 | `crates/zsdesk-windows/src/desktop.rs` | 桌面 Shell 集成 |
+| ☐ | `crates/zsdesk-windows/src/enumerate.rs` | 167 | 直接复用 | `crates/zsdesk-windows/src/enumerate.rs` | |
+| ☐ | `crates/zsdesk-windows/src/integration.rs` | 703 | 直接复用 | `crates/zsdesk-windows/src/integration.rs` | Shell 集成注册 |
+| ☐ | `crates/zsdesk-windows/src/taskbar.rs` | 85 | 直接复用 | `crates/zsdesk-windows/src/taskbar.rs` | |
+| ☐ | `crates/zsdesk-windows/src/ole/mod.rs` | 3 | 直接复用 | `crates/zsdesk-windows/src/ole/mod.rs` | |
+| ☐ | `crates/zsdesk-windows/src/ole/drop.rs` | 115 | 改造 | `crates/zsdesk-windows/src/ole/drop.rs` | **加 OLE 拖出**：`OleInitialize` + `SHCreateDataObject` + `IDropSource` + `DoDragDrop`（core-ui 明确支持宿主在鼠标回调里起拖） |
+| ☐ | `crates/zsdesk-windows/src/shell/mod.rs` | 28 | 直接复用 | `crates/zsdesk-windows/src/shell/mod.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/commands.rs` | 302 | 直接复用 | `crates/zsdesk-windows/src/shell/commands.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/file_transfer.rs` | 344 | 直接复用 | `crates/zsdesk-windows/src/shell/file_transfer.rs` | `IFileOperation` —— **D04 的核心复用点** |
+| ☐ | `crates/zsdesk-windows/src/shell/file_transfer_tests.rs` | 200 | 直接复用 | `crates/zsdesk-windows/src/shell/file_transfer_tests.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/icons.rs` | 467 | 直接复用 | `crates/zsdesk-windows/src/shell/icons.rs` | `IShellItemImageFactory` → BGRA 预乘（**改一处转换，不改结构**） |
+| ☐ | `crates/zsdesk-windows/src/shell/icons_alpha_tests.rs` | 99 | 直接复用 | `crates/zsdesk-windows/src/shell/icons_alpha_tests.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/notify.rs` | 72 | 直接复用 | `crates/zsdesk-windows/src/shell/notify.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/pidl.rs` | 67 | 直接复用 | `crates/zsdesk-windows/src/shell/pidl.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/search.rs` | 52 | 直接复用 | `crates/zsdesk-windows/src/shell/search.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/shell_item.rs` | 385 | 直接复用 | `crates/zsdesk-windows/src/shell/shell_item.rs` | **+ 扩展**：作为自绘导航树的数据源（已知文件夹枚举） |
+| ☐ | `crates/zsdesk-windows/src/shell/shell_item_contract_tests.rs` | 119 | 直接复用 | `crates/zsdesk-windows/src/shell/shell_item_contract_tests.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/events.rs` | 24 | 改造 | `crates/zsdesk-windows/src/shell/events.rs` | ZSUI 窗口消息 → core-ui 回调；桌面格子仍用 Win32 消息 |
+| ☐ | `crates/zsdesk-windows/src/shell/explorer_browser.rs` | 883 | 改造 | 拆：枚举部分 → `crates/zsdesk-windows/src/shell/shell_item.rs`；宿主部分 → **删除** | `IExplorerBrowser` 不能嵌（D04）；但里面的 `IShellItemArray` 枚举与视图状态逻辑要保留 |
+| ☐ | `crates/zsdesk-windows/src/shell/menu.rs` | 1,022 | 改造 | `crates/zsdesk-windows/src/shell/menu.rs` | Shell 右键菜单宿主：保留 `IContextMenu` / `IExplorerCommand` 逻辑，弹出改由 `.uix` `<menu>` 或原生 `TrackPopupMenu` |
+| ☐ | `crates/zsdesk-windows/src/shell/menu_runtime_tests.rs` | 254 | 改造 | `crates/zsdesk-windows/src/shell/menu_runtime_tests.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/new_menu.rs` | 73 | 改造 | `crates/zsdesk-windows/src/shell/new_menu.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/quick_menu.rs` | 61 | 改造 | `crates/zsdesk-windows/src/shell/quick_menu.rs` | |
+| ☐ | `crates/zsdesk-windows/src/shell/view_state.rs` | 312 | 改造 | `crates/zsdesk-windows/src/shell/view_state.rs` | 保留视图状态持久化，去掉 ExplorerBrowser 专属部分 |
+| ☐ | `crates/zsdesk-windows/src/flyout.rs` | 731 | 改造 | `crates/zsdesk-windows/src/flyout.rs` | 弹出菜单宿主：ZSUI → 原生 `HWND` 或 core-ui 菜单 |
+| ☐ | `crates/zsdesk-windows/src/flyout_layout.rs` | 248 | 改造 | `crates/zsdesk-windows/src/flyout_layout.rs` | |
+| ☐ | `crates/zsdesk-windows/src/gfx.rs` | 485 | 改造 | `crates/zsdesk-windows/src/gfx.rs` | Direct2D/DirectWrite 绘制 → core-ui 自绘；**保留** GDI 位图转换（HBITMAP → BGRA） |
+| ☐ | `crates/zsdesk-windows/src/theme.rs` | 221 | 改造 | `crates/zsdesk-windows/src/theme.rs` | DWM 效果部分保留；颜色取值改 core-ui 主题 |
+| ☐ | `crates/zsdesk-windows/src/shell/namespace_tree.rs` | 1,029 | **重写** | 数据源 → `crates/zsdesk-windows/src/shell/shell_item.rs` 扩展；渲染 → `crates/zsdesk-ui/src/navtree/` | `INameSpaceTreeControl` 是子窗口控件，不能嵌（D07 方案 A） |
 | ☐ | `crates/zsdesk-windows/src/shell/view_background.rs` | 186 | **删除** | —— | `IExplorerBrowser` 的背景绘制，随 D04 一并作废 |
 
-**新增（上游没有）**：`zc-windows/src/shell/thumb.rs`（缩略图，约 200 行 [估算]）、
-`zc-windows/src/shell/properties.rs`（`IShellPropertyStore`，约 200 行 [估算]）。
+**新增（上游没有）**：`crates/zsdesk-windows/src/shell/thumb.rs`（缩略图，约 200 行 [估算]）、
+`crates/zsdesk-windows/src/shell/properties.rs`（`IShellPropertyStore`，约 200 行 [估算]）。
 
 ---
 
-### 4.5 `zsdesk-app` → `zc-app`（92 文件 / 29,114 行）
+### 4.5 `zsdesk-app` → `zsdesk-app`（92 文件 / 29,114 行）
 
 #### 4.5.1 入口与运行时（13 文件）
 
 | ✓ | 上游文件 | 行 | 档 | 新落点 | 备注 |
 |---|---|---:|---|---|---|
-| ☐ | `src/main.rs` | 64 | **重写** | `crates/zc-app/src/main.rs` | 入口：`CoreUi::load_checked()` → `ui_init_with_theme` → `ui_page_open_window` → `ui_run` |
-| ☐ | `src/app.rs` | 436 | 改造 | `crates/zc-app/src/app.rs` | 参数解析**原样保留**；模式分发（Explorer / Desktop / Guard / ImportTencent / QuickSearch）保留，窗口创建改 core-ui |
-| ☐ | `src/commands.rs` | 119 | 改造 | `crates/zc-app/src/commands.rs` | 命令枚举保留；新增「投影到 `.uix`」的映射 |
-| ☐ | `src/runtime.rs` | 257 | 改造 | `crates/zc-app/src/runtime.rs` | |
-| ☐ | `src/instance.rs` | 132 | 改造 | `crates/zc-app/src/instance.rs` | 单实例：改用 core-ui 窗口唯一性判定 |
-| ☐ | `src/edition.rs` | 42 | 直接复用 | `crates/zc-app/src/edition.rs` | |
-| ☐ | `src/storage.rs` | 245 | 直接复用 | `crates/zc-app/src/storage.rs` | 配置 / 视图记忆持久化 |
-| ☐ | `src/build.rs` | 12 | 直接复用 | `crates/zc-app/build.rs` | |
+| ☐ | `src/main.rs` | 64 | **重写** | `crates/zsdesk-app/src/main.rs` | 入口：`CoreUi::load_checked()` → `ui_init_with_theme` → `ui_page_open_window` → `ui_run` |
+| ☐ | `src/app.rs` | 436 | 改造 | `crates/zsdesk-app/src/app.rs` | 参数解析**原样保留**；模式分发（Explorer / Desktop / Guard / ImportTencent / QuickSearch）保留，窗口创建改 core-ui |
+| ☐ | `src/commands.rs` | 119 | 改造 | `crates/zsdesk-app/src/commands.rs` | 命令枚举保留；新增「投影到 `.uix`」的映射 |
+| ☐ | `src/runtime.rs` | 257 | 改造 | `crates/zsdesk-app/src/runtime.rs` | |
+| ☐ | `src/instance.rs` | 132 | 改造 | `crates/zsdesk-app/src/instance.rs` | 单实例：改用 core-ui 窗口唯一性判定 |
+| ☐ | `src/edition.rs` | 42 | 直接复用 | `crates/zsdesk-app/src/edition.rs` | |
+| ☐ | `src/storage.rs` | 245 | 直接复用 | `crates/zsdesk-app/src/storage.rs` | 配置 / 视图记忆持久化 |
+| ☐ | `src/build.rs` | 12 | 直接复用 | `crates/zsdesk-app/build.rs` | |
 | ☐ | `src/framework_windows.rs` | 81 | **删除** | —— | ZSUI 窗口框架桥接 |
-| ☐ | `src/shell_window_registry.rs` | 1,073 | 改造 | `crates/zc-app/src/shell_window_registry.rs` | |
-| ☐ | `src/win_e_bridge.rs` | 380 | 改造 | `crates/zc-app/src/win_e_bridge.rs` | |
-| ☐ | `examples/desktop_probe.rs` | 46 | 直接复用 | `crates/zc-app/examples/desktop_probe.rs` | |
-| ☐ | `examples/enum_probe.rs` | 30 | 直接复用 | `crates/zc-app/examples/enum_probe.rs` | |
+| ☐ | `src/shell_window_registry.rs` | 1,073 | 改造 | `crates/zsdesk-app/src/shell_window_registry.rs` | |
+| ☐ | `src/win_e_bridge.rs` | 380 | 改造 | `crates/zsdesk-app/src/win_e_bridge.rs` | |
+| ☐ | `examples/desktop_probe.rs` | 46 | 直接复用 | `crates/zsdesk-app/examples/desktop_probe.rs` | |
+| ☐ | `examples/enum_probe.rs` | 30 | 直接复用 | `crates/zsdesk-app/examples/enum_probe.rs` | |
 
 #### 4.5.2 搜索（11 文件）
 
@@ -235,7 +235,7 @@
 | ☐ | `src/window/folder_sizes.rs` | 387 | 直接复用 | |
 | ☐ | `src/window/geometry.rs` | 77 | 改造 | 窗口几何 → core-ui `<window>` 属性 + `ui_window_set_rect` |
 | ☐ | `src/window/geometry_regression.rs` | 337 | 改造 | |
-| ☐ | `src/window/hover_preview.rs` | 374 | 改造 | 触发逻辑保留；渲染 → `zc-ui/src/preview/` |
+| ☐ | `src/window/hover_preview.rs` | 374 | 改造 | 触发逻辑保留；渲染 → `crates/zsdesk-ui/src/preview/` |
 | ☐ | `src/window/image_decode.rs` | 272 | 直接复用 | **WIC 解码**（实测 zsdesk 不用 ghde.dll） |
 | ☐ | `src/window/interaction_regression.rs` | 390 | 改造 | |
 | ☐ | `src/window/keyboard.rs` | 150 | 改造 | 快捷键 → `ui_window_on_key` |
@@ -262,6 +262,60 @@
 
 ---
 
+## 4.6 预览链路逐个判定（含依赖核对）
+
+> **核对方法**：对上游 9 个预览相关文件逐个 grep `use` / `super::` / `crate::` 依赖，
+> 确认它们**到底绑在什么宿主上**，再定档。**不凭文件名猜。**
+>
+> 依据：**D02**（GuoheView 只外部调 exe）+ **D06**（预览窗格保留、内容降级）
+> + **D04**（core-ui 不可嵌原生 HWND 子控件）。
+
+| 上游文件 | 行 | 实际依赖（实测 grep） | 宿主性质 | 档 |
+|---|---:|---|---|---|
+| `window/preview_process.rs` | 351 | `std::process::Command` + `Child` + `HWND` + `HANDLE` + `pipe`；`use selection::{ViewIdentity,ViewSnapshot}` | **独立子进程 + 原生窗口** | **改造** |
+| `window/quicklook.rs` | 108 | `use super::*`（即 `window/mod.rs` 内部）+ `HWND` + `ERROR_IO_PENDING` + `OpenOptions`（命名管道） | **原生窗口 + 管道 IPC** | **改造** |
+| `window/quick_preview.rs` | 791 | `mod image_decode; use image_decode::ImagePreview;` + `super::wps_preview::supported/render` + `HWND` + `implement!`（COM） | **原生窗口 + 依赖被删的 wps_preview** | **改造**（去掉 WPS 分支） |
+| `window/hover_preview.rs` | 374 | `use super::preview_process::PreviewProcess as QuickPreview` + `super::WM_SHELL_NAVIGATED` / `WM_LAYOUT` / `WM_DPICHANGED`（**自定义窗口消息**）+ `JoinHandle` 线程 | **原生窗口 + 自定义消息** | **改造** |
+| `window/preview_handlers.rs` | 133 | `PreviewProviderPreference`（`zsdesk_core`）+ `GUID` + `HWND` | 逻辑 + 原生窗口 | **改造** |
+| `window/preview_selection.rs` | 101 | `use super::super::Slot` + `super::super::pane_input::Identity` + `CoTaskMemFree`（PIDL） | **纯逻辑，无 UI 宿主** | **直接复用** |
+| `window/image_decode.rs` | 272 | **仅** `use super::{fit_dimensions, read_stream, wide, MAX_BITMAP_WIDTH, MAX_BITMAP_HEIGHT}` + `windows::…::Imaging::*`（WIC） | **纯 WIC，零 UI 依赖** | **直接复用**（不接入首版预览路径） |
+| `window/thumbnail_regression.rs` | 152 | `use super::*` + `CoCreateInstance` + `ensure!(crate::edition::THEMED, …)` | 回归测试 | **改造** |
+| `window/paint.rs` | 534 | `use super::*` + `windows::…::Direct2D::ID2D1Bitmap` + `windows::…::Imaging::IWICBitmapSource` + `zsdesk_ui::{chrome, theme}` + `zsdesk_windows::gfx` | **Direct2D 绘制** | **重写** |
+
+### 4.6.1 判定结论
+
+| 档 | 文件 | 行数 |
+|---|---|---:|
+| 直接复用 | `preview_selection.rs`、`image_decode.rs` | 373 |
+| 改造 | `preview_process.rs`、`quicklook.rs`、`quick_preview.rs`、`hover_preview.rs`、`preview_handlers.rs`、`thumbnail_regression.rs` | 1,029 |
+| 重写 | `paint.rs` | 534 |
+| 删除 | `wps_preview.rs`、`wps_render_process.rs` | 419 |
+
+**三条关键结论**：
+
+1. **`image_decode.rs` 是纯 WIC，零 UI 依赖**（实测：它的 `use` 里只有 `super::{fit_dimensions, read_stream, wide, MAX_*}`）
+   → **直接复用**，零改造成本。但按 **D02/D06**，**首版不接入预览路径**（保留为 M3+ 可选能力）。
+   这同时验证了一个此前未写进 facts 的事实：**zsdesk 完全不用 `ghde.dll`**（全仓 grep `ghde|GuoheView|guohe` 零命中）。
+2. **四个文件的宿主是「原生窗口 / 子进程 / 自定义窗口消息」**：
+   `preview_process`（子进程 + HWND）、`quicklook`（HWND + 命名管道）、
+   `hover_preview`（`super::WM_SHELL_NAVIGATED` 等自定义消息）、
+   `quick_preview`（HWND + 依赖 `wps_preview`）。
+   → core-ui **不可嵌原生 HWND 子控件**（D04 实测依据）→ 这四个文件的**宿主部分必须换掉**，
+   业务规则（何时预览、预览哪个、取消）**保留**。
+3. **`quick_preview.rs` 依赖被删的 `wps_preview`**（`super::wps_preview::supported/render`）
+   → 改造时必须**摘掉 WPS 分支**，否则编译不过。这是最容易漏的一处依赖。
+
+### 4.6.2 首版（M2）实际接入的部分
+
+| 保留 | 换掉 |
+|---|---|
+| 预览**触发规则**（选中即预览、延迟、取消） | 原生窗口宿主 → `.uix` 的 `preview_host` 面板 |
+| 元信息（`FileEntry` + `IShellPropertyStore`） | 图片解码 → **不做**（D02/D06） |
+| 纯文本读取 | WPS/Office 渲染 → **不做**（D06，文件已删） |
+| `image_decode.rs` 的 WIC 代码（在仓库里，不接线） | 缩略图异步流 → 用 `IShellItemImageFactory` 的 Shell 缩略图替代 |
+
+---
+
 ## 5. 删掉的 4 个文件（686 行）—— 明确的能力放弃
 
 | 文件 | 行 | 放弃的能力 | 替代物 | 决策 |
@@ -279,13 +333,13 @@
 
 | 新增 | 落点 | 规模 [估算] | 里程碑 |
 |---|---|---:|---|
-| core-ui 动态绑定层 | `crates/zc-ffi-coreui/` | 1,200–1,800 行 | M0 |
-| 自绘文件列表 | `crates/zc-ui/src/filelist/` | 2,000–4,000 行 | M1 |
-| 自绘导航树 | `crates/zc-ui/src/navtree/` | 600–1,000 行 | M1 |
+| core-ui 动态绑定层 | `crates/zsdesk-coreui/` | 1,200–1,800 行 | M0 |
+| 自绘文件列表 | `crates/zsdesk-ui/src/filelist/` | 2,000–4,000 行 | M1 |
+| 自绘导航树 | `crates/zsdesk-ui/src/navtree/` | 600–1,000 行 | M1 |
 | `.uix` 页面 | `ui/*.uix` | 800–1,500 行 | M1–M2 |
-| 预览窗格 | `crates/zc-ui/src/preview/` | 500–900 行 | M2 |
-| Shell 缩略图 / 属性 | `crates/zc-windows/src/shell/{thumb,properties}.rs` | 300–500 行 | M1 |
-| 核心 UI 胶水（状态投影） | `crates/zc-ui/src/shell_page.rs` + `crates/zc-app/src/view_model.rs` | 500–900 行 | M1 |
+| 预览窗格 | `crates/zsdesk-ui/src/preview/` | 500–900 行 | M2 |
+| Shell 缩略图 / 属性 | `crates/zsdesk-windows/src/shell/{thumb,properties}.rs` | 300–500 行 | M1 |
+| 核心 UI 胶水（状态投影） | `crates/zsdesk-ui/src/shell_page.rs` + `crates/zsdesk-app/src/view_model.rs` | 500–900 行 | M1 |
 
 **合计新增**：约 5,900–10,600 行 [估算]。
 

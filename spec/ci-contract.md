@@ -1,442 +1,275 @@
-# CI 与打包契约
+# CI 与打包契约 —— 目标态 vs 当前态
 
-> 契约编号：`ZC-CI-001`
-> 状态：已定（随 D10 生效）
+> 契约编号：`ZC-CI-001`（v3）
+> 状态：已定（随 D03 / D05 / D09 / D11 生效）
+> 评审对象：`.github/workflows/build.yml`（**当前 402 行 / 3 个 job，team-lead 实现并已推送**）+ `docs/ci.md`
 > 依据：上游 `qiu7824/zsdesk` 的 `.github/workflows/build.yml`（实测规范）+ `research/facts.md` §7.4 / §7.6
-> **CI 现状（已实测）**：fork 的 Actions **早已启用**，并在 commit `4a48349` 跑绿过 `Windows build #1`（9m58s）→ **上游那套「checkout + Rust 1.99 + `cargo test --workspace --release --locked`」链路已验证可用**，本契约在其上增量扩展，**不重写**。
-> **本机无 cargo / rustc / cmake / MSVC**（实测）→ **一切编译与运行验证只能靠 CI**。
+> **CI 现状（已实测）**：fork 的 Actions **早已启用**，并在 commit `4a48349` 跑绿过
+> `Windows build #1`（9m58s）。
+> **第一次新 CI 已实跑**：run `43387095246` —— 步骤 1–11 全绿（cargo test / cargo build / clippy /
+> clang-cl 探测 / ninja 安装），**挂在第 12 步 `Build core-ui from source`**；
+> 根因定位为 core-ui 用 `FetchContent` 现场拉 QuickJS-NG（`GIT_TAG v0.14.0` + `GIT_SHALLOW TRUE`），
+> 已加固（预置 `_deps/quickjs-src` + `GIT_TERMINAL_PROMPT=0`），第二次 CI 已推送。
+
+> **v3 的定位变更**：v1 是「从零写 CI」，v2 是「评审 + 缺口」。
+> **v3 改成两栏对照** —— 左栏「目标态」是契约，右栏「当前态」是**已实现**的事实。
+> **本文件不再引用尚不存在的脚本名而不加标注**（v2 的问题：把目标态写成了现状）。
 
 ---
 
-## 1. 三条设计前提
+## 1. 两栏读法
 
-1. **Rust 侧不能依赖 core-ui**（D09 的直接推论）。
-   `cargo test --workspace --release --locked` 必须在**没有 core-ui.dll、没有 core-ui 源码**的环境里跑通。
-   → CI 拆成**独立 job**：`rust` job 与 `core-ui` job **互不依赖**。
-2. **core-ui 自己没有构建工作流**（实测：core-ui 只有 `deploy-pages.yml`）。
-   → core-ui 的构建步骤由**我们**维护，落在 `.github/workflows/build.yml` 里。
-3. **产物必须可复现、可校验**：便携 ZIP 里要能证明「这份 `core-ui.dll` 就是 pinned revision 构建的那份」。
-
----
-
-## 2. 工作流文件清单
-
-| 文件 | 触发 | 职责 |
+| 栏 | 含义 | 权威性 |
 |---|---|---|
-| `.github/workflows/build.yml` | `push` / `pull_request` / `workflow_dispatch` | **主工作流**：3 个 job（`rust` / `core-ui` / `package`）+ 全部机械门禁 |
-| `.github/workflows/release.yml` | `push: tags: v*` | 便携 ZIP 发布（`workflow_call` 复用 `build.yml` 的 job，不重复写） |
-| `scripts/build-coreui.ps1` | — | 调 core-ui 上游的 `scripts/build-clang-cl.ps1`，并做产物校验 |
-| `scripts/check-coreui-dll.ps1` | — | **门禁 S7**：PE 位数 / CRT 模式 / 导出面 / 版本号 / revision 戳记 |
-| `scripts/check-coreui-api.py` | — | **门禁 S8**：Rust 绑定声明 vs `docs/05-COREUI-EXPORTS.txt` 的 `ui_*` 集合 |
-| `scripts/check-crate-dag.py` | — | **门禁 S9 / S10**：crate 依赖无环 + FFI 层无业务依赖 |
-| `scripts/package-portable.ps1` | — | 便携 ZIP 组装 + 逐文件 `bytes + SHA-256` manifest（沿用上游 `scripts/package.ps1` 的清单机制） |
+| **目标态** | 契约要求「最终必须成立」的性质 | **权威**。这一栏是验收依据 |
+| **当前态** | 2026-11-13 `.github/workflows/build.yml` 的**实际内容** | **事实**，但可能落后于目标态 |
 
-> **门禁不放独立 workflow**（`gates.yml` 不新建）：上游只有一个 `build.yml`，
-> 门禁分散到两个文件会让「哪条失败对应哪次改动」变难追溯。全部并进 `build.yml` 的
-> `rust` job 末尾，失败即停。
+**判定列的三种取值**：
+`✅ 已达成` · `🟡 部分达成` · `⛔ 未达成` · `⏳ 待绑定层落地后启用`
+
+> **一条纪律**：目标态里的每一条，要么已达成，要么有明确的**落点**与**里程碑**。
+> 不写「建议」这种无法判死的条目。
 
 ---
 
-## 3. `build.yml` —— 步骤级契约
+## 2. 当前态快照（实测 `build.yml`，2026-11-13）
 
-### 3.0 顶层（**沿用上游，逐字保留前三项**）
-
-```yaml
-name: Windows build
-
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-env:
-  # —— 沿用上游 zsdesk build.yml ——
-  CARGO_INCREMENTAL: '0'
-  CARGO_PROFILE_DEV_DEBUG: '0'
-  CARGO_PROFILE_TEST_DEBUG: '0'
-  # —— 本仓新增 ——
-  CARGO_PROFILE_RELEASE_DEBUG: '0'
 ```
+job rust       （无 needs → 与 core-ui 互不依赖）
+  Read the pinned ZSUI revision → checkout qiu7824/zsui
+  checkout ghboke/core-ui（pinned revision）
+  rust-toolchain 1.99.0
+  Test              cargo test --workspace --release --locked
+  Build the full edition (x64)   cargo build --locked --release -p zsdesk-app
+  Clippy (advisory) continue-on-error
+  Upload the executable → artifact zsdesk-app-full-x64
 
-> **新增第四项的理由**：上游只有前三项。`CARGO_PROFILE_RELEASE_DEBUG=0` 让 release
-> 产物与本地 `cargo build --release` 完全一致，避免「CI 绿、本地行为不同」。
-> 代价：release 崩溃栈不带行号 —— 但本仓 release 崩溃靠 `tracing` 日志定位，不依赖调试符号。
+job core-ui   （无 needs）
+  Read the pinned core-ui revision → checkout ghboke/core-ui
+  Locate clang-cl and llvm-rc        ← llvm-rc 缺失即 throw
+  Ensure Ninja is available           ← pip install ninja 兜底
+  Clean the build directory           ← 删 clang-cl-build/（防复用旧 CMakeCache）
+  Pre-fetch QuickJS-NG into the FetchContent slot   ← 预置 _deps/quickjs-src
+  Build core-ui from source
+  Upload the core-ui build log        ← 失败时可取日志
+  Verify core-ui.dll is a Windows x86-64 image      ← PE Machine == 0x8664
+  Gate G2  — DLL 版本必须与 pinned revision 对应（core-ui/VERSION ↔ DLL 版本资源）
+  Gate S7  — core-ui.dll 必须链动态 VC++ 运行库（dumpbin 判定 /MD）
+  Upload core-ui.dll → artifact core-ui-x64
 
-### 3.1 Job `rust` —— Rust 编译 / 测试 / 门禁（**不依赖 core-ui**）
-
-```yaml
-  rust:
-    name: Rust 编译 / 测试 / 门禁
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: zsdesk-coreui
-
-      - uses: dtolnay/rust-toolchain@1.99.0
-
-      - name: 读取 core-ui revision（仅供门禁比对，不参与构建）
-        id: dependency
-        shell: pwsh
-        run: '"revision=$((Get-Content -LiteralPath zsdesk-coreui/packaging/core-ui-revision.txt -Raw).Trim())" >> $env:GITHUB_OUTPUT'
-
-      - name: 测试
-        working-directory: zsdesk-coreui
-        run: cargo test --workspace --release --locked
-
-      - name: 构建 full edition（D05：唯一交付形态）
-        working-directory: zsdesk-coreui
-        shell: pwsh
-        run: |
-          cargo build --locked --release -p zc-app --features network,desktop
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cargo clippy --locked --release -p zc-app --features network,desktop -- -D warnings
-          exit $LASTEXITCODE
-
-      - name: 门禁 S9 / S10 —— crate 依赖方向
-        working-directory: zsdesk-coreui
-        run: python3 scripts/gates/check_crate_dag.py
-
-      - name: 门禁 S11 —— core-ui 绑定面 vs 导出表
-        working-directory: zsdesk-coreui
-        run: python3 scripts/check-coreui-api.py --exports docs/05-COREUI-EXPORTS.txt
-
-      - name: 门禁 G01/G03/G04/G08 —— 静态门禁
-        working-directory: zsdesk-coreui
-        run: python3 scripts/gates/verify.py --phase 3
-
-      - name: 门禁 E 段 —— 工程门禁 P0
-        working-directory: zsdesk-coreui
-        run: python3 scripts/gates/gates_engineering.py --min-sev P0
-
-      - name: 上传可执行文件
-        uses: actions/upload-artifact@v4
-        with:
-          name: zc-app-full-x64
-          path: zsdesk-coreui/target/release/zc-app.exe
-```
-
-> **D05 收窄说明**：上游 `build.yml` 的「Check all editions」与
-> 「Test theme and desktop-only editions」两步**删除**，改为只对 `full`
-> （`--features network,desktop`）跑 build / test / clippy。
-> `--locked` 保留不动。
-
-### 3.2 Job `core-ui` —— 从源码构建 core-ui（**不依赖 `rust` job**）
-
-```yaml
-  core-ui:
-    name: core-ui 源码构建
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: zsdesk-coreui
-
-      - name: 读取 core-ui revision
-        id: dependency
-        shell: pwsh
-        run: '"revision=$((Get-Content -LiteralPath zsdesk-coreui/packaging/core-ui-revision.txt -Raw).Trim())" >> $env:GITHUB_OUTPUT'
-
-      - uses: actions/checkout@v7
-        with:
-          repository: ghboke/core-ui
-          ref: ${{ steps.dependency.outputs.revision }}
-          path: core-ui
-
-      - name: 准备 Ninja
-        run: choco install ninja -y --no-progress
-
-      - name: 准备 LLVM（clang-cl + llvm-rc）
-        shell: pwsh
-        run: |
-          $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
-          $rc    = Get-Command llvm-rc.exe  -ErrorAction SilentlyContinue
-          if (-not $clang -or -not $rc) {
-            choco install llvm -y --no-progress
-            $env:PATH = "C:\Program Files\LLVM\bin;$env:PATH"
-            Add-Content -Path $env:GITHUB_PATH -Value "C:\Program Files\LLVM\bin"
-            $clang = Get-Command clang-cl.exe -ErrorAction SilentlyContinue
-            $rc    = Get-Command llvm-rc.exe  -ErrorAction SilentlyContinue
-          }
-          if (-not $clang) { throw "clang-cl.exe 缺失（core-ui 只支持 MSVC / clang-cl）" }
-          if (-not $rc)    { throw "llvm-rc.exe 缺失（Windows SDK 的 rc.exe 10.0.26100 在 ninja 子进程会挂起，必须用 llvm-rc）" }
-          "clang-cl: $($clang.Source)"  | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          "llvm-rc:  $($rc.Source)"     | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      - name: 构建 core-ui（上游脚本，-Target core-ui，动态 CRT /MD）
-        working-directory: core-ui
-        shell: pwsh
-        run: |
-          & ./scripts/build-clang-cl.ps1 -Target core-ui
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-
-      - name: 门禁 S7 —— 产物校验（位数 / CRT / 导出面 / 版本）
-        working-directory: zsdesk-coreui
-        shell: pwsh
-        run: |
-          & ./scripts/check-coreui-dll.ps1 `
-            -DllPath "core-ui/clang-cl-build/core-ui.dll" `
-            -ExpectedRevision "${{ steps.dependency.outputs.revision }}" `
-            -ExpectedExports "docs/05-COREUI-EXPORTS.txt"
-          exit $LASTEXITCODE
-
-      - name: 写 revision 戳记
-        shell: pwsh
-        run: |
-          "${{ steps.dependency.outputs.revision }}" | Out-File `
-            -FilePath "core-ui/clang-cl-build/core-ui.dll.revision" `
-            -Encoding utf8 -NoNewline
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: core-ui-dll
-          path: |
-            core-ui/clang-cl-build/core-ui.dll
-            core-ui/clang-cl-build/core-ui.dll.revision
-```
-
-**关键点**
-
-| 项 | 决定 | 理由 |
-|---|---|---|
-| 构建入口 | 上游 `scripts/build-clang-cl.ps1 -Target core-ui` | 不重写上游构建逻辑（D03）；上游脚本已内置 `llvm-rc` 替换 |
-| CRT | **不加** `-StaticCrt`（保持 `UI_CORE_MSVC_STATIC_CRT=OFF` → `/MD`） | D00-5；与 Rust MSVC 默认一致，与用户已装的 v14 运行库一致 |
-| 输出目录 | `core-ui/clang-cl-build/core-ui.dll` | 上游脚本固定输出到 `<repo>/clang-cl-build/`；Ninja 单配置 → DLL 直接在 build 根 |
-| `llvm-rc` | **必须** | Windows SDK 的 `rc.exe` 10.0.26100 在 ninja 子进程会挂起（上游脚本注释原文） |
-| 钉 revision | `actions/checkout` + `ref: <revision 文件内容>` | **沿用上游 zsui-revision.txt 的同一套机制**，只是换成 `core-ui-revision.txt` |
-| 与 `rust` job 的关系 | **无 `needs:`** | 两个 job 互不依赖 —— 这正是 D09「Rust 侧不依赖 core-ui」的 CI 表达 |
-
-### 3.3 Job `package` —— 便携 ZIP 组装（依赖前两个 job）
-
-```yaml
-  package:
-    name: 便携包组装
-    needs: [rust, core-ui]
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          path: zsdesk-coreui
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: zc-app-full-x64
-          path: stage/zc-app.exe
-      - uses: actions/download-artifact@v4
-        with:
-          name: core-ui-dll
-          path: stage/
-
-      - name: 组装目录
-        shell: pwsh
-        run: |
-          $stage = "stage"
-          New-Item -ItemType Directory -Force -Path "$stage/ui"          | Out-Null
-          Copy-Item "zsdesk-coreui/assets/*.uix" "$stage/ui/" -Force
-          if (Test-Path "zsdesk-coreui/assets/assets") {
-            Copy-Item "zsdesk-coreui/assets/assets" "$stage/ui/assets" -Recurse -Force
-          }
-          Copy-Item "zsdesk-coreui/assets/themes.json" "$stage/ui/" -Force
-          Copy-Item "zsdesk-coreui/LICENSE" "$stage/" -Force
-          Copy-Item "zsdesk-coreui/THIRD-PARTY-NOTICES.txt" "$stage/" -Force
-
-      - name: 门禁 S12 —— 组装后自检（core-ui.dll 必须在 exe 同目录）
-        shell: pwsh
-        run: |
-          & ./scripts/check-coreui-dll.ps1 `
-            -DllPath "stage/core-ui.dll" `
-            -ExpectedRevision "$(Get-Content zsdesk-coreui/packaging/core-ui-revision.txt -Raw).Trim()" `
-            -ExpectedExports "zsdesk-coreui/docs/05-COREUI-EXPORTS.txt" `
-            -RequireBesideExe "stage/zc-app.exe"
-          exit $LASTEXITCODE
-
-      - name: 生成 manifest + ZIP
-        shell: pwsh
-        run: |
-          & ./scripts/package-portable.ps1 -StageDir "stage" -OutFile "ZSDesk-${{ github.sha }}-full-x64.zip"
-          exit $LASTEXITCODE
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ZSDesk-full-x64
-          path: ZSDesk-*-full-x64.zip
+job package  needs: [rust, core-ui]
+  Download the executable / Download core-ui.dll
+  Gate S12 — core-ui.dll 必须与 exe 同目录
+  Collect the Visual C++ x64 Redistributable    ← vswhere 定位
+  Package the portable x64 zip
+      exe→ZSDesk.exe / core-ui.dll / core-ui.dll.revision / assets/（含断言）
+      / 3 个 CRT DLL / LICENSE / notices / licenses/ / 说明.txt / manifest.sha256
+  Upload the portable package → ZSDesk-full-x64
 ```
 
 ---
 
-## 4. 门禁清单（每条都有执行器）
+## 3. 逐条对照
 
-> 依据 `10-standards/mechanical-gates.md`：「没有执行器的规则，只是建议。」
-> **失败即停**：门禁失败只有两条路 —— 修，或显式登记豁免（写清谁豁免 / 为什么 / 何时复审）。
-> **禁止**调低阈值、加 ignore、用 `it.skip` 混过去。
+### 3.1 工作区与步骤顺序
 
-| # | 门禁 | 检查什么 | 失败处置 | 执行命令 |
-|---|---|---|---|---|
-| G01 | emoji 扫描 | 源码 / `.uix` / 文档出现 emoji | 换语义图标 | `python3 scripts/gates/gates.py G01` |
-| G03 | 单文件行数 | 任一 `.rs` > 300 行 | 拆分 | `python3 scripts/gates/gates.py G03` |
-| G04 | 分层方向 | 底层 crate 反向依赖上层 | 修正 | `python3 scripts/gates/gates.py G04` |
-| G08 | 图标库唯一 | 同时出现多套图标库 | 统一到 `ui/assets/icons/*.svg` | `python3 scripts/gates/gates.py G08` |
-| E07 | 硬编码密钥 | 字面量 token / 密钥 | 走环境变量 | `python3 scripts/gates/gates_engineering.py E07` |
-| E11 | 外部调用无超时 | 调外部进程 / COM 无超时 | 加超时 | `python3 scripts/gates/gates_engineering.py E11` |
-| **S7** | **core-ui 产物校验** | PE machine = `0x8664`；导入表含 `VCRUNTIME140` / `MSVCP140`（= `/MD` 动态 CRT）；导出面与 `docs/05-COREUI-EXPORTS.txt` 一致；版本号 = `1.9.0.345` | 修正构建 | `pwsh scripts/check-coreui-dll.ps1 …` |
-| **S8** | **绑定面 vs 导出表** | Rust 绑定层声明的 `ui_*` 集合 ⊆ `docs/05-COREUI-EXPORTS.txt` 的 567 个；且**必需符号**全部在集合内 | 改绑定 / 改 revision | `python3 scripts/check-coreui-api.py --exports docs/05-COREUI-EXPORTS.txt` |
-| **S9** | **crate 依赖无环** | `cargo metadata` 解析的依赖图无环 | 修正 | `python3 scripts/gates/check_crate_dag.py` |
-| **S10** | **FFI 层无业务依赖** | `zc-ffi-coreui/Cargo.toml` 无任何 `zc-*` 路径依赖 | 修正 | 同上 |
-| **S11** | **可选符号声明正确** | 绑定层 `optional` 表里的符号必须**确实不在**必需表里；标为「本机 DLL 独有」或「仓库独有」的符号各有归属 | 修正 | 同 `check-coreui-api.py` |
-| **S12** | **产物布局** | `core-ui.dll` 必须与 exe 同目录（否则会命中系统 PATH 里的别的 core-ui.dll） | 修正打包脚本 | `pwsh scripts/check-coreui-dll.ps1 -RequireBesideExe …` |
+| # | 目标态 | 当前态 | 判定 |
+|---|---|---|---|
+| 1 | CI 工作区 = `app/` + `zsui/` + `core-ui/` 三级同级（对应 `../../../xxx` path 依赖） | 已实现 | ✅ |
+| 2 | **Rust 侧在 core-ui 之前**（D09：动态加载 → Rust 不依赖 core-ui） | `rust` job 无 `needs`；`core-ui` job 无 `needs` → **互不依赖** | ✅ |
+| 3 | `package` job 依赖前两者 | `needs: [rust, core-ui]` | ✅ |
+| 4 | 只 full edition（`network+desktop`） | `cargo build -p zsdesk-app`（default features） | ✅（建议后续显式写 features） |
+| 5 | `cargo test --workspace --release --locked` | 已实现 | ✅ |
+| 6 | env：`CARGO_INCREMENTAL` / `CARGO_PROFILE_DEV_DEBUG` / `CARGO_PROFILE_TEST_DEBUG` = '0' | 已实现 | ✅ |
+| 7 | 可补 `CARGO_PROFILE_RELEASE_DEBUG: '0'` | 未设 | 🟡 低优先 |
+| 8 | `clippy` 最终必须转阻断 | `continue-on-error: true`（advisory） | 🟡 **M1 前收敛**（见 §5.1） |
 
-### 4.1 S7 的 CRT 检查怎么落地（为什么这条重要）
+### 3.2 core-ui 构建
 
-D00-5 要求三方 `/MD` 一致：Rust MSVC（默认 `/MD`）、clang-cl core-ui（`UI_CORE_MSVC_STATIC_CRT=OFF` → `/MD`）、用户本机已装的 v14 运行库。
+| # | 目标态 | 当前态 | 判定 |
+|---|---|---|---|
+| 9 | 用上游 `scripts/build-clang-cl.ps1 -Target core-ui`（不重写上游构建逻辑） | 已实现 | ✅ |
+| 10 | `llvm-rc` 缺失即失败（Windows SDK 的 `rc.exe` 10.0.26100 在 ninja 子进程会挂起） | `Locate clang-cl and llvm-rc`，缺 llvm-rc 直接 throw，并注释说明「不能静默退回 rc.exe」 | ✅ |
+| 11 | 构建前清掉 `clang-cl-build/`（上游脚本**目录存在就跳过 configure** → 会用旧配置产物） | `Clean the build directory` | ✅ |
+| 12 | core-ui 用 `FetchContent` 现场拉 QuickJS-NG → CI 需预置源码 | `Pre-fetch QuickJS-NG into the FetchContent slot`（`git clone --depth 1 --branch v0.14.0 --recurse-submodules` → `_deps/quickjs-src`） | ✅ **这是第 12 步失败的加固** |
+| 13 | 构建失败要能取到日志 | `Upload the core-ui build log` | ✅ |
+| 14 | 不加 `-StaticCrt`（保持 `/MD`） | 未加 | ✅ |
 
-**可执行的判据**：用 `dumpbin /dependents core-ui.dll` 看导入表。
+### 3.3 产物校验（Gate）
 
-| 导入表含 | 判定 |
-|---|---|
-| `VCRUNTIME140.dll` + `MSVCP140.dll` | ✅ **动态 CRT（`/MD`）** —— 与 Rust MSVC 和用户 v14 运行库一致 |
-| **不含** 上述两者 | ❌ **静态 CRT（`/MT`）** —— 会与 Rust 侧的 CRT 分配器不匹配（跨模块 `malloc`/`free` 配对风险）→ **判失败** |
+| # | 目标态 | 当前态 | 判定 |
+|---|---|---|---|
+| 15 | **位数**：PE Machine == `0x8664` | `Verify core-ui.dll is a Windows x86-64 image` | ✅ |
+| 16 | **G2 revision 一致性**：DLL 版本资源 == pinned revision 的 `VERSION` | `Gate G2 — the DLL version must match the pinned revision` | ✅ |
+| 17 | **G2b 戳记**：打包写出 `core-ui.dll.revision`，运行时比对 | 打包拷 `app/target/release/core-ui.dll.revision`（**若存在**）→ 戳记由 Rust 侧 build.rs/构建产出 | 🟡 **戳记的产出方要定**（见 §5.2） |
+| 18 | **S7 CRT 动态性**：导入表必须含 `MSVCP140.dll` + `VCRUNTIME140.dll` | `Gate S7 — core-ui.dll must link the dynamic VC++ runtime`（dumpbin 判定） | ✅ |
+| 19 | **S12 同目录**：`core-ui.dll` 与 exe 同目录 | `Gate S12` | ✅ |
+| 20 | **S7' 导出面**：CI 编出的 DLL 的 `ui_*` 集合 vs `docs/05-COREUI-EXPORTS.txt`，差异 ⊆ {`ui_core_embed_binary`, `ui_dialog`} | 未实现 | ⛔ 见 §5.3 |
+| 21 | **S8 绑定面**：绑定层声明 ⊆ 实测导出集合；必需∩可选=∅；必需不含 12 个「本机独有」符号 | 未实现 | ⏳ **待绑定层落地后启用**（`spec/rust-ffi-skeleton/` 合并进 `crates/zsdesk-coreui/` 之后） |
 
-> 这是本仓唯一能**机器判定** CRT 一致性的手段，也是「C2 不引入 .NET 10、只依赖已装 v14 运行库」
-> 这条约束的守门人。
+### 3.4 打包
 
-### 4.2 S7 的导出面检查为什么要比对 `docs/05-COREUI-EXPORTS.txt`
+| # | 目标态 | 当前态 | 判定 |
+|---|---|---|---|
+| 22 | **G1 `assets/` 必须进包**（`main.uix` / `preview.uix` / `about.uix` / `themes.json`）—— 缺了交付的 exe **启动即失败** | 已实现，且**逐个断言**四个文件存在 | ✅ |
+| 23 | 逐文件 `bytes + SHA-256` manifest（沿用上游口径） | `manifest.sha256`（`hash  rel  bytes  version` —— **多了文件版本列**） | ✅ |
+| 24 | **G6 CRT/资源来源记录** + 已知风险提示 | `说明.txt` 写明「同目录运行库优先于系统目录；遇异常请装最新 VC++ x64 运行库」；manifest 末列是文件版本 | ✅ |
+| 25 | 产物名 `ZSDesk-<version>-full-x64.zip`，只 x64 | 已实现 | ✅ |
+| 26 | **Everything 引擎不入包**（可选后端） | 未入包 | ✅（但见 §5.4 的产品条款） |
+| 27 | `licenses/` + LICENSE + notices | 已实现 | ✅ |
 
-**头文件不是完备契约**（ABI-NOTES 硬规则 1）。实测：
+### 3.5 门禁脚本（机械门禁）
 
-| 项 | 数量 |
-|---|---|
-| DLL 总导出 | 2006 |
-| DLL 的 `ui_*` 纯 C API | **567** |
-| 头文件声明的 `ui_*` | 557 |
-| **DLL 比头文件多** | **12**（`ui_flush_gpu`、`ui_image_evict_tile`、`ui_image_view_gdi`、`ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}`） |
-| **头文件比 DLL 多** | **2**（`ui_core_embed_binary`、`ui_dialog`） |
-
-**但 CI 构建出来的 DLL 是从仓库 main 编的**，所以它必然：
-- **有** `ui_core_embed_binary` 与 `ui_dialog`（仓库有）；
-- **没有**那 12 个「本机独有」的符号（仓库的 `ui_api.cpp` 里有定义但头文件漏声明 —— V04 说「上游头文件漏同步声明，不是本机版本领先」）。
-
-→ 由此得出一条**新的能力结论**（覆盖 ABI-NOTES 的 V04 表述）：
-
-> **那 12 个符号在「仓库 main 编出来的 DLL」里是没有的**（虽然 `src/ui/ui_api.cpp` 有 `UI_API` 定义，
-> 但 `UI_API` 在该构建配置下不导出，或导出名不同）。
-> 因此 **CI 产物上 `image_gdi` 能力族必然为 `false`** → 我们的绑定层必须把它当**可选**能力，
-> 且**不能**把它作为任何功能的必要路径。
-
-S7 就是把这条结论变成机器检查：CI 编出的 DLL 的 `ui_*` 导出集合必须与
-`docs/05-COREUI-EXPORTS.txt`（本机 DLL 的集合）**逐名比对**，差异项必须落在
-「仓库有 / 本机无」或「本机有 / 仓库无」两张已知清单里，**出现第三类差异即失败**。
-
-### 4.3 S8 的判定规则
-
-```
-必需符号（Api 表）⊆ 567 个 ui_* 集合      → 否则 FAIL（加载会失败）
-可选符号（OptionalApi 表）⊆ 567 个 ui_* 集合 → 否则 FAIL（声明了一个不存在的符号）
-「必需 ∩ 可选」= ∅                        → 否则 FAIL（同一符号两张表都写 = 意图不明）
-必需符号里不得出现 12 个「本机独有」符号    → 否则 FAIL（CI 产物上不存在）
-```
+| # | 目标态 | 当前态 | 判定 |
+|---|---|---|---|
+| 28 | **S9 crate 依赖无环** | `scripts/gates/check_crate_dag.py` —— **脚本不存在**，CI 未调用 | ⛔ 见 §5.5 |
+| 29 | **S10 FFI 层无业务依赖** | 同上 | ⛔ |
+| 30 | **G01/G03/G04/G08 + 工程门禁 P0** | `scripts/gates/verify.py` / `gates_engineering.py` —— **脚本不存在**，CI 未调用 | ⛔ 见 §5.5 |
+| 31 | **S13 token 不撞名**（禁止自定义库 token 名，见 `spec/ffi-core-ui.md` §5.6.1） | 未实现 | ⛔ 见 §5.5 |
+| 32 | **G7 错误流**：移走 `core-ui.dll` → 启动 → 非零码退出 + 打印候选路径列表 | 未实现 | ⛔ 见 §5.6（M0 之后） |
+| 33 | **G10 `zsui` 收口门禁**（M3：workspace 不再有 zsui path 依赖、CI 不再 checkout zsui） | 未实现 | ⏳ M3 |
 
 ---
 
-## 5. 打包契约
+## 4. 仍然缺的（按落地顺序）
 
-### 5.1 目录布局（便携包）
+### 4.1 🟡 `clippy` 收敛期限（M1 前）
+
+**现状**：`continue-on-error: true`（advisory）。
+**目标**：M1 结束前转成阻断（`cargo clippy --locked --release -p zsdesk-app -- -D warnings`）。
+**理由**：`clippy -D warnings` 是 Rust 侧唯一能机器判死的「unsafe 用错 / 错误转换」门禁；
+一直观察等于这道门禁不存在。**建议在 `build.yml` 里写一行注释标明收敛期限**，避免变成永久豁免。
+
+### 4.2 🟡 revision 戳记的**产出方**要定（G2b）
+
+**现状**：打包步骤拷 `app/target/release/core-ui.dll.revision`（**若存在**）——
+即戳记由 **Rust 构建**产出，而不是由 CI 从 `packaging/core-ui-revision.txt` 直接写。
+
+**两种口径，二选一（必须一致）**：
+
+| 口径 | 产出方 | 优点 | 缺点 |
+|---|---|---|---|
+| **甲：Rust 产出** | `crates/zsdesk-coreui/build.rs` 把 `packaging/core-ui-revision.txt` 的 SHA 固化成 `ZSCOREUI_CORE_UI_REVISION`，并**同时**在 `target/release/` 旁写一份 `core-ui.dll.revision` | 运行时比对的是**编译期固化的那个值**（`spec/ffi-core-ui.md` §5.5 机制），编译期与运行期天然一致 | build.rs 要写文件，跨平台要注意 |
+| **乙：CI 产出** | CI 从 `packaging/core-ui-revision.txt` 读 SHA，打包时写 `core-ui.dll.revision` | 简单直接 | 运行时要比对的必须是**同一个**值 —— Rust 侧得从 exe 同目录读戳记文件，而不是用编译期常量 |
+
+**架构侧推荐：甲**（Rust 产出），CI 只负责**把戳记拷进包**。
+理由：`spec/ffi-core-ui.md` §5.5 的比对机制是「编译期固化的 `EXPECTED_REVISION` vs 旁置戳记」，
+**编译期常量才是权威**；若戳记由 CI 写，两者可能来自不同来源 → 比对失去意义。
+→ **契约要求**：戳记文件的内容必须 **== 编译期 `EXPECTED_REVISION`**；
+CI 侧加一条断言「打包进去的戳记 == `packaging/core-ui-revision.txt`」。
+
+### 4.3 ⛔ S7' 导出面（CI 编出的 DLL vs 导出表）
+
+**为什么必须**：`Gate G2` 比的是**版本号**；但「同版本」不等于「同 API 面」。
+上游头文件**漏声明**了 12 个本机实际导出的符号（`docs/05-COREUI-ABI-NOTES.md` V04），
+说明**版本号与 API 面不是单调关系**。
+
+**判定规则**（可机械执行）：
 
 ```
-ZSDesk-<version>-full-x64/
-├── zc-app.exe                       # 主程序
-├── core-ui.dll                      # ★ 必须与 exe 同目录（D09 / 门禁 S12）
-├── core-ui.dll.revision             # ★ revision 戳记（运行时比对，见 ffi-core-ui.md §5.5）
-├── ui/
-│   ├── main.uix
-│   ├── preview.uix
-│   ├── about.uix
-│   ├── themes.json
-│   └── assets/{icons/*.svg, theme.css, images/*}
-├── LICENSE
-├── THIRD-PARTY-NOTICES.txt
-└── manifest.json                    # 逐文件 {path, bytes, sha256}
+CI 编出的 core-ui.dll → 导出表 → 取 ui_* 集合 C
+docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
+断言：L ⊆ C                      （本机有的，CI 产物也必须有）
+断言：C \ L ⊆ {ui_core_embed_binary, ui_dialog}   （仓库 main 多出来的只能是这两个）
+断言：C \ L 之外没有第三类差异
 ```
 
-### 5.2 打包规则
+### 4.4 ⛔ 静态门禁与 crate 依赖方向门禁
 
-| 规则 | 依据 |
-|---|---|
-| 产物名 `ZSDesk-<version>-full-x64.zip` | D05 |
-| **只构建 / 只测试 / 只发布 `full`**（`--features network,desktop`） | D05 |
-| **只 x64**，无 32 位产物 | D00-7 |
-| 逐文件 `bytes + SHA-256` manifest | 沿用上游 `scripts/package.ps1` |
-| 强制校验 Visual C++ x64 Redistributable（`msvcp140` / `vcruntime140` / `vcruntime140_1`） | 沿用上游 `package.ps1` |
-| **不打包** `ghde.dll` / `guohe-view-thumb.dll` | D02：GuoheView 是外部程序，只做运行时调用 |
-| **过渡期同时打包** `zsui` 相关内容（C4） | C4：过渡期保留双通道；替换完成后移除 |
+**注意**：v2 列出的 4 个脚本路径 **在仓库里都不存在**（实测确认）：
 
-### 5.3 运行时查找顺序（D09 的落地）
+| 脚本 | 状态 | 落点 | 内容约定 |
+|---|---|---|---|
+| `scripts/gates/check_crate_dag.py` | ❌ 不存在 | M1 前创建 | 解析各 crate `Cargo.toml` 的 path 依赖 → 建图 → 判环（**S9**）；并断言 `crates/zsdesk-coreui/Cargo.toml` 不含任何指向 `zsdesk-core`/`-platform`/`-ui`/`-app`/`-windows` 的 path 依赖（**S10**） |
+| `scripts/check-coreui-api.py` | ❌ 不存在 | 绑定层落地后创建 | 解析绑定层声明的符号名 → 必须 ⊆ S7' 实测集合；必需∩可选=∅；必需不含 12 个「本机独有」符号（**S8**） |
+| `scripts/gates/verify.py` / `gates_engineering.py` | ❌ 不存在 | 从专家包 `templates/gates/` 复制 | G01/G03/G04/G08 + 工程门禁 P0 |
+| S13 token 门禁 | ❌ 不存在 | M1 前创建 | 扫描 `assets/*.uix` + `assets/themes.json` 的自定义属性**定义**（`--name:`，不含 `var(--name)` 引用）→ 命中库 34 个 token 全集即失败；另禁自定义 `--app-accent` |
 
-`zc-ffi-coreui` 的 `default_candidates()` 顺序：
+> **纪律**（`mechanical-gates` §4）：**失败即停**。禁止调低阈值、加 ignore、`it.skip` 混过去。
+> 例外必须**显式登记豁免**（谁豁免 / 为什么 / 何时复审）。
 
-1. `<exe 同目录>\core-ui.dll` —— **CI 产物的权威副本**
-2. `<exe 同目录>\core-ui\core-ui.dll`
-3. `<exe 同目录>\..\core-ui.dll`
-4. `C:\Program Files\GuoheView\core-ui.dll` —— **兜底**
+### 4.5 ⏳ G7 错误流（M0 之后）
 
-> **为什么不能靠 DLL 搜索路径**：链接期会产生静态 import 表 `core-ui.dll`，
-> Windows 加载器按「exe 目录 → 系统目录 → PATH」找。若 exe 目录缺 DLL，
-> 就会命中 PATH 里**用户自己装的**那份（`C:\Program Files\GuoheView\core-ui.dll`）——
-> 那份**不受我们控制**，用户升级 GuoheView 就可能换掉 API 面。
-> 动态加载让我们能**显式限定搜索路径**并在兜底时打警告 + 比对 revision 戳记。
+**契约**：**移走 `core-ui.dll` 后启动，必须非零码退出，并在 stderr 打印完整候选路径列表**；
+**不得**静默回退到 `C:\Program Files\GuoheView\core-ui.dll`（兜底，不是分发渠道），**不得**白屏。
+
+**为什么是契约**：这是 D09「显式限定搜索路径」的全部价值所在。
+启动时悄悄用了 GuoheView 那份 → 用户会遇到「API 面不匹配」的玄学问题，且**永远不会知道**。
+
+**加法（M0 落地后）**：CI 里加一步 —— 把 exe 与 `core-ui.dll` 复制到临时目录 →
+删掉 `core-ui.dll` → 运行 exe → **断言退出码非 0 且 stderr 含 `core-ui.dll`**。
+
+### 4.6 一条**不属于 CI 但必须写进契约**的产品条款
+
+**Everything 引擎不入包**（已定）→ 用户的机器上**可能没有 Everything**。
+
+→ **产品契约**：Everything 是**可选后端**；不可用时搜索必须**自动回退**
+（MFT / USN 索引 → 目录扫描），且 UI 上要**让用户知道当前用的是哪个后端**
+（上游 `zsdesk-core` 已有 `SearchBackendPreference`，
+`zsdesk-app/src/fast_search/everything_runtime.rs` 已有运行时探测）。
+**不允许**因为 Everything 缺失就静默地「搜不出东西」。
+
+→ **CI 侧对应冒烟项（M3）**：在**没有 Everything** 的 runner 上，搜索仍能返回结果。
 
 ---
 
-## 6. 本地开发与 CI 的关系
+## 5. 一句话结论
 
-| 场景 | 能不能本地做 | 怎么办 |
-|---|---|---|
-| 改 Rust 代码 + 跑单元测试 | ❌ 本机无 cargo | 只能推 CI（**本机 `cargo_run=false` 必须如实标注**，不得把「未验证」写成「已通过」） |
-| 看 core-ui 的 API | ✅ | `docs/05-COREUI-EXPORTS.txt` + `docs/05-COREUI-ABI-NOTES.md` |
-| 验证 `.uix` 语法 | ⚠️ 部分 | 标签表 `docs/11-COREUI-MARKUP-TAGS.md`；但 M01~M06 仍需真机 |
-| 跑真机冒烟 | ❌ | 需要一台装了 core-ui + GuoheView 的 Windows 机（人工） |
+> **工作流主干与「产物可信」这一层（位数 / revision 版本 / 动态 CRT / 同目录 / assets 进包 /
+> manifest 版本列 / 干净构建 / llvm-rc 硬失败 / QuickJS 预置）已经到位** ——
+> 这是一次高质量的实现，架构侧逐条核对无误。
+> **剩下的缺口集中在「机械门禁」这一层**（S7' 导出面 / S8 绑定面 / S9·S10 依赖方向 /
+> 静态门禁 / S13 token），它们**依赖绑定层与门禁脚本先落地**，因此不是 CI 的问题，
+> 而是**M1 的产出物**。
+> **另外两条要在 M1 前定**：clippy 的收敛期限（§4.1）、revision 戳记的产出方（§4.2）。
 
 ---
 
-## 7. 端到端验证（CI 必须能自证）
+## 6. 端到端验证（CI 必须能自证）
 
 ```powershell
-# 1) Rust 侧（不需要 core-ui）
+# ① Rust 侧（不需要 core-ui）
 cargo test --workspace --release --locked
-#    期望：全部 PASS；且测试过程中**没有**任何对 core-ui.dll 的文件访问
 
-# 2) core-ui 侧
-pwsh scripts/check-coreui-dll.ps1 -DllPath core-ui/clang-cl-build/core-ui.dll `
-    -ExpectedRevision (Get-Content packaging/core-ui-revision.txt -Raw).Trim() `
-    -ExpectedExports docs/05-COREUI-EXPORTS.txt
-#    期望：位数 x64 / CRT 动态 / 导出面差异只落在两张已知清单内 / 版本 1.9.0.345
+# ② core-ui 侧（当前态已覆盖）
+#   - PE machine == 0x8664                        ✅ 已实现
+#   - DLL 版本 == pinned revision 的 VERSION       ✅ 已实现（Gate G2）
+#   - 导入表含 VCRUNTIME140.dll + MSVCP140.dll      ✅ 已实现（Gate S7）
+#   - 导出面 L ⊆ C 且 C\L ⊆ {embed_binary, dialog} ⛔ 待实现（S7'）
+#   - 绑定面 ⊆ 实测导出集合                        ⏳ 待绑定层落地（S8）
 
-# 3) 产物侧
-pwsh scripts/check-coreui-dll.ps1 -DllPath stage/core-ui.dll -RequireBesideExe stage/zc-app.exe
-#    期望：core-ui.dll 与 exe 同目录，且 revision 戳记一致
+# ③ 产物侧（当前态已覆盖）
+#   - core-ui.dll 与 exe 同目录                    ✅ 已实现（Gate S12）
+#   - assets/ 四件套齐全                           ✅ 已实现
+#   - core-ui.dll.revision 戳记 == revision 文件     🟡 产出方待定（§4.2）
+#   - manifest 每个文件的 sha256 可复算             ✅ 已实现
 
-# 4) 关键错误流（必须能判失败，不是静默降级）
-#    把 core-ui.dll 移走 → 启动 zc-app.exe → 必须以非零码退出，
-#    且 stderr 打印完整候选列表（不是白屏、不是静默回退到 GuoheView 那份）
+# ④ 关键错误流
+#   移走 core-ui.dll → 启动 → 非零码退出 + stderr 打印候选路径列表   ⛔ 待实现（G7）
+
+# ⑤ 机械门禁
+python3 scripts/gates/check_crate_dag.py         ⛔ 脚本不存在
+python3 scripts/check-coreui-api.py              ⛔ 脚本不存在
+python3 scripts/gates/verify.py --phase 3        ⛔ 脚本不存在
 ```
 
 ---
 
-## 8. out-of-scope
+## 7. 本文件不做的事
 
-1. **不建** `gates.yml` 独立工作流（见 §2 的理由）。
-2. **不做** macOS / Linux 交叉编译（core-ui 只支持 Windows）。
-3. **不做** 多版本矩阵（`matrix.version`）—— 只跟 pinned revision。
-4. **不做** 自动发布到 Release（`release.yml` 只在 tag 触发，且需要人工确认）。
-5. **不引入** `cargo-dist` / `cross` 等第三方发布工具（沿用上游 `package.ps1`）。
+1. **不重写** CI 实现 —— 实现归运维，契约归架构；本文件只给判定与缺口。
+2. **不规定** 具体用 PowerShell / Python / bash 写哪个脚本 —— 只规定**判定什么**。
+3. **不改** 上游 CI 已验证可用的部分（checkout 机制、Rust toolchain、`--locked`、env 三项）。
+4. **不把目标态写成现状** —— 这是 v2 的教训：v2 引用的 4 个脚本在仓库里并不存在。
 
 ---
 
-## 9. 关联文档
+## 8. 关联文档
 
-- `spec/ffi-core-ui.md` —— 动态加载、版本协商、revision 戳记
-- `spec/crate-layout.md` —— crate 划分、依赖方向、门禁清单
-- `spec/milestones.md` —— M0~M3 与本契约的对应
+- `spec/ffi-core-ui.md` —— 动态加载、版本协商、revision 戳记（§5.5）、页面加载（§4.3.2）、`.uix` 三条硬约束（§4.3.3）
+- `spec/crate-layout.md` —— crate 划分、依赖方向（S9/S10 的对象）、`.uix` 资产约束
+- `spec/milestones.md` —— M0~M3 与本契约的对应（哪条门禁在哪个里程碑启用）
+- `docs/ci.md` —— 运维的实现说明
 - `docs/05-COREUI-ABI-NOTES.md` —— U01~U12 未核实项
+- `docs/05-COREUI-EXPORTS.txt` —— 绑定清单与 S7'/S8 的权威来源
+- `docs/12-UIX-TAG-FIX.md` —— 17 个 token 终表（S13 的依据）

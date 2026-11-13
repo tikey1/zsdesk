@@ -24,6 +24,26 @@
 //!    core-ui 的 UI 线程上执行。工作线程的调用必须经 `ui_window_invoke_sync`
 //!    封送（见 `ui_thread.rs`）。违反这一条是未定义行为，不是「慢一点」。
 //!
+//! ## 符号清单的权威来源
+//!
+//! **不是本文件，也不是头文件，而是 `docs/05-COREUI-EXPORTS.txt`**（本机 DLL 的
+//! 2006 个导出，其中 **567** 个 `ui_*` 纯 C API）。
+//! 头文件只提供**签名**，而且**漏声明**了 12 个本机 DLL 实际导出的符号
+//! （见 `docs/05-COREUI-ABI-NOTES.md` V04）。
+//!
+//! ## 未核实项（`docs/05-COREUI-ABI-NOTES.md` §2 的 U01~U12）
+//!
+//! 本文件的签名**全部来自上游头文件**，属于「未核实」状态：
+//! **U01** `ui_init_with_theme` 参数 · **U02** `ui_page_load_file` 路径编码与失败返回 ·
+//! **U03** `ui_page_open_window` 的配置结构体布局 · **U04** `set_json`/`get_json` 的类型映射与释放方 ·
+//! **U05** `ui_custom_on_draw` 回调签名/绘制子集/回调线程 · **U06** `ui_widget_on_mouse_*` 注册注销语义 ·
+//! **U07** `ui_bitmap_create` 的像素格式与生命周期 · **U08** GDI 位图语义 ·
+//! **U09** `UiColor` 取值域 · **U10** `ui_debug_free` 的适用范围 ·
+//! **U11** `ui_scroll_set_content` 语义 · **U12** `ui_ocr_img_view_*` 可复用性。
+//!
+//! **不得凭导出名反推参数**（ABI-NOTES 硬规则 3）。
+//! **每接入一组 API，必须先过对应的 U 项最小验证**（见 `spec/milestones.md` §1.5）。
+//!
 //! ## 为什么手写而不是 bindgen
 //!
 //! 见 `spec/ffi-core-ui.md` §2。一句话：bindgen 需要编译期存在 core-ui 头文件，
@@ -312,6 +332,10 @@ extern "C" {
 extern "C" {
     /// 路径是 UTF-16LE。
     pub fn ui_page_load_file(path: *const u16) -> UiPage;
+    /// 源码是 **UTF-8**。★ 本项目实际用这个 —— Rust 要在加载前把 `:root { … }`
+    /// 拼进 `.uix` 源码（库没有运行时替换 CSS 变量的 C API），
+    /// 且深浅色切换必须用**新的**源码重新加载（`ui_page_reload` 会重放旧源码）。
+    pub fn ui_page_load_string(html_source: *const u8) -> UiPage;
     pub fn ui_page_destroy(p: UiPage);
     pub fn ui_page_reload(p: UiPage) -> i32;
     pub fn ui_page_root(p: UiPage) -> UiWidget;
@@ -387,7 +411,6 @@ extern "C" {
 // ---------------------------------------------------------------------------
 // 调试 / 离屏（CI 验证用）
 // ---------------------------------------------------------------------------
-
 extern "C" {
     /// 【转移】必须用 `ui_debug_free` 释放。
     pub fn ui_debug_free(ptr: *mut c_void);
@@ -426,3 +449,21 @@ extern "C" {
     pub fn ui_image_get_pixels(w: UiWidget, win: UiWindow, out_pixels: *mut *mut c_void, out_w: *mut i32, out_h: *mut i32) -> i32;
     pub fn ui_image_free_pixels(ptr: *mut c_void);
 }
+
+// ---------------------------------------------------------------------------
+// 可选符号（`Option` 语义，缺失即降级）
+//
+// 声明放在 `loader.rs` 的 `define_optional_api!` 宏里（那里直接生成
+// `Option<fn>` 字段）。此处只做**契约记录**：
+//
+// | 符号 | 头文件 | 本机 DLL | 处置 |
+// |---|---|---|---|
+// | `ui_dialog` | 有声明 `UI_API UiWidget ui_dialog(void);` | **无导出** | 可选；缺失时用 `ui_msgbox` 兜底 |
+// | `ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}` | **无声明** | 有导出 | **不绑定、不调用**（签名未知，U08 待核对） |
+// | `ui_image_view_gdi` / `ui_image_evict_tile` / `ui_flush_gpu` | **无声明** | 有导出 | **不绑定、不调用**（签名未知） |
+//
+// `ui_core_embed_binary` **不是 C API** —— 它是 CMake 辅助函数
+// （`cmake/embed_binary.cmake`），用于生成内嵌字节的 .h 文件。
+// 从来不会出现在任何 DLL 的导出表里，**不在绑定清单里**。
+// 发布态的资源注册走 `ui_asset_register_blob`。
+// ---------------------------------------------------------------------------

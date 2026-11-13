@@ -57,17 +57,24 @@
 
 `assets/main.uix`（83 行）、`assets/preview.uix`（32 行）、`assets/about.uix`（32 行）实测用到的标签：
 
-| 用到的标签 | 出现次数 | core-ui 是否识别 | 必须改成 |
+| 用到的标签 | 出现次数（`main.uix` 单文件实测） | core-ui 是否识别 | 必须改成 |
 |---|---|---|---|
-| `<text>` | 10 | ✗ **不识别** | `<label>`（需换行）或 `<span>`（不换行） |
+| `<text>` | 7 | ✗ **不识别** | `<label>`（需换行）或 `<span>`（不换行） |
 | `<hbox>` | 7 | ✗ **不识别** | `<div>` + CSS `flex-direction: row` |
 | `<vbox>` | 1 | ✗ **不识别** | `<div>`（默认 column） |
 | `<vseparator>` | 2 | ✗ **不识别** | 竖向分隔线需用 `<div>` + 固定宽度 + 背景色（`<Separator>` 是水平线） |
-| `<text-input>` | 2 | ✗ **不识别** | `<input>` |
+| `<text-input>` | 3 | ✗ **不识别** | `<input>` |
 | `<panel>` | 4 | ✗ **不识别** | `<div>` |
 | `<separator>` | 4 | ✓ 识别 | 保留 |
 | `<label>` | 2 | ✓ 识别 | 保留 |
 | `<window>` `<script>` `<style>` `<template>` | 各 1 | ✓ 识别 | 保留 |
+
+> 三个文件合计：`main.uix` 34 / `preview.uix` 12 / `about.uix` 19 个元素；标签总数 46 处待替换。
+> ⚠️ 计数只算**开标签**（闭合标签不重复计入）。
+> ⚠️ **本表只覆盖标签名**。另有两个会让整页 load 失败的独立问题，由 QA 复核发现并已核实：
+> ① **`<window>` 必须自闭合**（上游 `src/ui/uix/sfc_parser.cpp`）→ 非自闭合会 `pushErr` → `doc.ok=false` → **整页加载失败**；
+> ② **`text="..."` 不是文本属性** → 真实取文本的机制是**元素内部文本节点**，属性写法全部无效。
+> 详见 `docs/14-QA-UIX-REVIEW.md`。
 
 ### 2.1 修正规则（机械，不改设计意图）
 1. `<hbox>` → `<div>`，并在 `<style>` 里给该类补 `flex-direction: row;`

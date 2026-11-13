@@ -6,8 +6,10 @@
 - 探针对象：本机 `C:\Program Files\GuoheView\core-ui.dll`
 - 文件大小：4,782,536 字节
 - PE Machine：`0x8664`（**x86-64**）
-- 上游版本声明：`ghboke/core-ui` @ main 的 `VERSION` / `version.json` = `1.9.0.345` → **与本机 DLL 一致**
-  - ⚠️ 用户路线图 §3 C2 提到「具备 Core UI 1.9.0.346 的真机」；本机实测为 **1.9.0.345**，差一个 build 号，**真机核对前不要假定 346 有额外导出**。
+- 上游版本声明：`ghboke/core-ui` @ main 的 `VERSION` / `version.json` = `1.9.0.345`
+- **本机 DLL 实际版本 = `1.9.0.346`**（PE `FileVersionRaw` + DLL 内嵌字符串双重确认）→ **本机 DLL 比 pinned revision 新一个 build**。详见 `research/facts.md` §7.11 修正 1。
+- ⚠️ 用户路线图 §3 C2 提到「具备 Core UI 1.9.0.346 的真机」—— **本机正是 346**；而 CI 从 pinned revision（345）构建出的产物是 345。
+- ⚠️ 由此：**能力协商必须按「实测符号集」而非「版本号」**（`research/facts.md` §7.11 修正 2 —— 567 个 `ui_*` 在 pinned revision 的源码里全部存在，12 个只是头文件漏声明；反向只有 `ui_dialog` 一个已从源码删除）。
 - 方法：自写 PE 导出表解析器（仅用 Python 标准库，无外部依赖），逐符号名比对；与上游 `include/ui_core.h` 的声明做集合差集。
 - 完整符号清单：**`docs/05-COREUI-EXPORTS.txt`**（2006 个导出，其中 567 个 `ui_*`）
 

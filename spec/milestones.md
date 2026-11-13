@@ -28,32 +28,39 @@
 | # | 产出物 | 落点 |
 |---|---|---|
 | M0-1 | workspace 骨架：6 个 crate 的 `Cargo.toml` + 空 `lib.rs` | `crates/zc-{core,platform,windows,ffi-coreui,ui,app}/` |
-| M0-2 | **core-ui 动态绑定骨架**（手写 extern + 必需/可选符号表 + 版本协商 + UI 线程收敛） | `crates/zc-ffi-coreui/`（原型见 `spec/rust-ffi-skeleton/`） |
+| M0-2 | **core-ui 动态绑定骨架**（手写 extern + 必需/可选符号表 + 版本协商 + UI 线程收敛） | `crates/zsdesk-coreui/`（原型见 `spec/rust-ffi-skeleton/`） |
 | M0-3 | `packaging/core-ui-revision.txt`（= `1840d689b51a32d392dbf06b8d594aef96696a80`） | `packaging/` |
 | M0-4 | `.github/workflows/build.yml`（3 job：rust / core-ui / package）+ `scripts/check-coreui-dll.ps1` + `scripts/check-coreui-api.py` + `scripts/gates/check_crate_dag.py` | `.github/workflows/`、`scripts/` |
 | M0-5 | 机械门禁脚本与**首次基线**（`scripts/gates/verify.py --phase 3` 的输出落盘） | `scripts/gates/` |
 | M0-6 | `assets/*.uix` 的**标签机械修正**（`<text>`→`<label>`、`<hbox>`/`<vbox>`/`<panel>`→`<div>`、`<text-input>`→`<input>`、`<vseparator>`→`<div>`），**保持 D-15 静态布局 only 不变** | `assets/` |
-| M0-7 | 最小可运行 exe：`zc-app.exe` 能启动 → 加载 core-ui.dll → 打开 `.uix` 页面 → 显示一个空的自绘矩形 | `crates/zc-app/src/main.rs` |
+| M0-7 | 最小可运行 exe：`zsdesk-app.exe` 能启动 → 加载 core-ui.dll → 打开 `.uix` 页面 → 显示一个空的自绘矩形 | `crates/zsdesk-app/src/main.rs` |
+| M0-8 | **打包含 `assets/`**（`main.uix` / `preview.uix` / `about.uix` / `themes.json`）—— 🔴 **CI 当前的致命缺口**，见 `spec/ci-contract.md` §2.4 | `assets/` → ZIP 内 `assets/` |
+| M0-9 | **revision 一致性校验**：checkout ref == `packaging/core-ui-revision.txt`；打包写出 `core-ui.dll.revision` 戳记 | `spec/ci-contract.md` §3.1 |
 
 ### 1.2 验收标准
 
 | # | 标准 | 判定方式 |
 |---|---|---|
 | V0.1 | `cargo test --workspace --release --locked` 全绿，**且测试过程中不访问 `core-ui.dll`** | CI job `rust` |
-| V0.2 | `cargo build --locked --release -p zc-app --features network,desktop` 成功 | CI job `rust` |
+| V0.2 | `cargo build --locked --release -p zsdesk-app --features network,desktop` 成功 | CI job `rust` |
 | V0.3 | `cargo clippy -- -D warnings` 零告警 | CI job `rust` |
 | V0.4 | CI 能从 `packaging/core-ui-revision.txt` 精确 checkout core-ui 并构建出 `core-ui.dll` | CI job `core-ui` |
 | V0.5 | **S7 通过**：PE machine = `0x8664`；导入表含 `VCRUNTIME140.dll` + `MSVCP140.dll`（动态 CRT）；导出面差异只落在两张已知清单内 | `scripts/check-coreui-dll.ps1` |
 | V0.6 | **S8 通过**：必需符号 ⊆ 567 个 `ui_*`；必需 ∩ 可选 = ∅；必需符号不含 12 个「本机独有」符号 | `scripts/check-coreui-api.py` |
-| V0.7 | **S9/S10 通过**：crate 依赖图无环；`zc-ffi-coreui` 无任何 `zc-*` 路径依赖 | `scripts/gates/check_crate_dag.py` |
+| V0.7 | **S9/S10 通过**：crate 依赖图无环；`zsdesk-coreui` 无任何 `zsdesk-coreui` 不依赖任何 `zsdesk-*` 路径依赖 | `scripts/gates/check_crate_dag.py` |
 | V0.8 | 便携包内 `core-ui.dll` 与 exe 同目录，revision 戳记一致 | `scripts/check-coreui-dll.ps1 -RequireBesideExe` |
 | V0.9 | **关键错误流**：移走 `core-ui.dll` 后启动 → **非零码退出** + stderr 打印完整候选列表（不静默回退到 `C:\Program Files\GuoheView\core-ui.dll`） | 人工 + CI 脚本 |
 | V0.10 | 静态门禁 G01/G03/G04/G08 + 工程门禁 E 段 P0 全绿 | `scripts/gates/verify.py --phase 3` |
+| **V0.11** | ★ **Actions 跑出第一次 full x64 绿灯** —— `Windows build` 工作流在 `push` 上首次全绿，且产出的 `ZSDesk-<version>-full-x64.zip` 可下载 | GitHub Actions 页面 + artifact |
+| **V0.12** | ★ **解包即用的冒烟**：把 ZIP 解到空目录 → 运行 `ZSDesk.exe` → **出现带标题栏的窗口**（不是白屏、不是报错退出） | 人工（CI runner 无交互桌面 → 需真机；CI 侧只能验到「进程能启动并加载 core-ui.dll」） |
+| V0.13 | 打包产物内含 `assets/` 四个关键文件 + `core-ui.dll.revision` 戳记，且戳记内容 == `packaging/core-ui-revision.txt` | `spec/ci-contract.md` §2.4 / §3.1 |
+| V0.14 | **`.uix` 三条硬约束落地**：① `<window .../>` 自闭合；② 文字写在元素内（无 `text=` 属性）；③ 根 `<div class="root">` + `.root {…}`（无 `window {…}` 选择器） | `spec/ffi-core-ui.md` §4.3.3 |
+| V0.15 | **加载失败能区分两类**：整页解析失败（`ui_page_load_string` 返回 NULL + `ui_page_last_error`）vs 局部控件缺失（加载成功但 `find_by_id` 返回 0） | 同上 |
 
 ### 1.3 可演示的动作
 
 1. 打开 CI 的 Actions 页面 → `Windows build` 全绿（3 个 job）。
-2. 下载 `ZSDesk-full-x64` 便携包 → 解压 → 双击 `zc-app.exe` → **出现一个带标题栏的空窗口**，
+2. 下载 `ZSDesk-full-x64` 便携包 → 解压 → 双击 `ZSDesk.exe` → **出现一个带标题栏的空窗口**，
    窗口里有一个 Rust 侧 `ui_custom_on_draw` 画出来的灰色矩形。
 3. 把 `core-ui.dll` 改名 → 再启动 → 弹出明确的错误提示（列出 tried 过的路径）。
 
@@ -65,6 +72,9 @@
 | core-ui revision 固定 | ✅ M0-3 |
 | core-ui 的 C++ 构建链（VS 2022 + LLVM + CMake + Ninja） | ⚠️ CI runner 自带 VS 2022 / CMake / LLVM，**Ninja 需 `choco install ninja`** |
 | Rust 工具链 | ⚠️ 本机无，**CI 提供** |
+| **CI 可用性** | ✅ **已实测**：fork 的 Actions 已启用，commit `4a48349` 跑绿过 `Windows build #1`（9m58s）→ 上游那套链路已验证可用 |
+| core-ui C++ 构建链 | ⚠️ CI runner 自带 VS 2022 / CMake / LLVM；**Ninja 需 `pip install ninja`**（实现已处理） |
+| `assets/` 进包 | 🔴 **M0 必须补**（当前 CI 实现漏了 → 交付物启动即失败） |
 
 ### 1.5 M0 阶段要解决的 **U 项**（ABI-NOTES §2）
 
@@ -87,14 +97,14 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 
 | # | 产出物 | 落点 |
 |---|---|---|
-| M1-1 | `.uix` 静态布局落地（修正后的 `main.uix` 标签）+ **Rust 侧 `ui_widget_find_by_id` 取句柄** | `assets/main.uix`、`crates/zc-ui/src/shell_page.rs` |
-| M1-2 | **Rust 自绘文件列表**：虚拟滚动 + 命中测试 + 单击/多选/框选/反向选择 + 图标 + 详细信息列 + 排序 | `crates/zc-ui/src/filelist/` |
-| M1-3 | **Rust 自绘导航树**（已知文件夹 + 快速访问 + 展开收起） | `crates/zc-ui/src/navtree/` |
-| M1-4 | 标签条 / 地址栏 / 状态栏（Rust 侧状态 → `.uix` 小载荷投影） | `crates/zc-app/src/view_model.rs` |
-| M1-5 | `IShellItemArray` 枚举 + `IShellItemImageFactory` 取图标（BGRA 预乘）+ LRU 缓存 | `crates/zc-windows/src/shell/{shell_item,icons}.rs` |
-| M1-6 | `IShellPropertyStore` 详细信息列 | `crates/zc-windows/src/shell/properties.rs` |
-| M1-7 | 视图记忆 / 列宽 / 排序记忆 | `crates/zc-app/src/storage.rs`（沿用上游 `window/view_memory.rs`） |
-| M1-8 | 核心 UI 迁移的第一批 `zsdesk-app` 重写（`window/mod.rs` / `paint.rs` / `input.rs` / `mouse_gestures.rs` / `wheel_input.rs`） | `crates/zc-app/src/window/` |
+| M1-1 | `.uix` 静态布局落地（修正后的 `main.uix` 标签）+ **Rust 侧 `ui_widget_find_by_id` 取句柄** | `assets/main.uix`、`crates/zsdesk-ui/src/shell_page.rs` |
+| M1-2 | **Rust 自绘文件列表**：虚拟滚动 + 命中测试 + 单击/多选/框选/反向选择 + 图标 + 详细信息列 + 排序 | `crates/zsdesk-ui/src/filelist/` |
+| M1-3 | **Rust 自绘导航树**（已知文件夹 + 快速访问 + 展开收起） | `crates/zsdesk-ui/src/navtree/` |
+| M1-4 | 标签条 / 地址栏 / 状态栏（Rust 侧状态 → `.uix` 小载荷投影） | `crates/zsdesk-app/src/view_model.rs` |
+| M1-5 | `IShellItemArray` 枚举 + `IShellItemImageFactory` 取图标（BGRA 预乘）+ LRU 缓存 | `crates/zsdesk-windows/src/shell/{shell_item,icons}.rs` |
+| M1-6 | `IShellPropertyStore` 详细信息列 | `crates/zsdesk-windows/src/shell/properties.rs` |
+| M1-7 | 视图记忆 / 列宽 / 排序记忆 | `crates/zsdesk-app/src/storage.rs`（沿用上游 `window/view_memory.rs`） |
+| M1-8 | 核心 UI 迁移的第一批 `zsdesk-app` 重写（`window/mod.rs` / `paint.rs` / `input.rs` / `mouse_gestures.rs` / `wheel_input.rs`） | `crates/zsdesk-app/src/window/` |
 
 > **首版只读**（D-15）：命令条不含新建 / 重命名 / 删除 / 剪贴板命令。
 
@@ -111,6 +121,8 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | V1.7 | **OLE 拖出探针**：在文件列表里按住一个文件拖到桌面 → 桌面能放下（`DoDragDrop` 成功） | **最小探针**，core-ui 未文档承诺 `WM_CAPTURECHANGED` 行为 |
 | V1.8 | 导航树能展开「此电脑 / 回收站 / 快速访问 / 网络」，点击能导航 | 人工 |
 | V1.9 | **深浅色切换不突变**（D10 的 token 路线生效） | 截图对比 |
+| V1.10a | **页面用 `ui_page_load_string` 加载**（Rust 注入 `:root`）→ 证明 `.uix` 与 `themes.json` 在运行时被读到 | 打包缺资源时会立刻暴露 |
+| V1.10b | **`ui_theme_set_accent_hex` 被调用** → 自绘区蓝与按钮蓝一致（不撞成两种蓝） | 截图对比 |
 | V1.10 | 全部门禁（含新增的 S8/S9/S10）全绿 | CI |
 
 ### 2.3 可演示的动作
@@ -159,13 +171,13 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 
 | # | 产出物 | 落点 |
 |---|---|---|
-| M2-1 | **GuoheView 外部调用入口**：优先走系统文件关联 `ShellExecuteW(hwnd, L"open", <文件>, …)`；兜底显式指定 `C:\Program Files\GuoheView\GuoheView.exe` + 参数 | `crates/zc-ui/src/external.rs` |
-| M2-2 | **可检性检查**：`GuoheView` 未安装 / 未注册文件关联 / exe 存在但启动失败 → 三种可区分的结论 | `crates/zc-ui/src/external.rs` |
-| M2-3 | **降级通道**：未安装 → 提示 + 提供「用系统默认程序打开」/「在资源管理器中显示」两个替代动作；不静默失败 | 同上 + `crates/zc-app/src/window/` |
-| M2-4 | **错误提示文案**（人话 + 下一步动作，不用「错误 0x80070002」） | `crates/zc-ui/src/external.rs` + `.lang` |
-| M2-5 | **预览窗格降级内容**：图标 + 元信息（名称/大小/类型/时间）+ 纯文本预览（`.txt/.md/.log/.json/.rs` 等）+ 「用 GuoheView 打开」按钮 | `crates/zc-ui/src/preview/` |
-| M2-6 | 外部调用的**超时与失败归一化**（不阻塞 UI 线程） | `crates/zc-windows/src/` |
-| M2-7 | 安全基线落地：调用参数**数组化**（不拼命令行）、路径规范化、失败日志脱敏 | `crates/zc-ui/src/external.rs` |
+| M2-1 | **GuoheView 外部调用入口**：优先走系统文件关联 `ShellExecuteW(hwnd, L"open", <文件>, …)`；兜底显式指定 `C:\Program Files\GuoheView\GuoheView.exe` + 参数 | `crates/zsdesk-ui/src/external.rs` |
+| M2-2 | **可检性检查**：`GuoheView` 未安装 / 未注册文件关联 / exe 存在但启动失败 → 三种可区分的结论 | `crates/zsdesk-ui/src/external.rs` |
+| M2-3 | **降级通道**：未安装 → 提示 + 提供「用系统默认程序打开」/「在资源管理器中显示」两个替代动作；不静默失败 | 同上 + `crates/zsdesk-app/src/window/` |
+| M2-4 | **错误提示文案**（人话 + 下一步动作，不用「错误 0x80070002」） | `crates/zsdesk-ui/src/external.rs` + `.lang` |
+| M2-5 | **预览窗格降级内容**：图标 + 元信息（名称/大小/类型/时间）+ 纯文本预览（`.txt/.md/.log/.json/.rs` 等）+ 「用 GuoheView 打开」按钮 | `crates/zsdesk-ui/src/preview/` |
+| M2-6 | 外部调用的**超时与失败归一化**（不阻塞 UI 线程） | `crates/zsdesk-windows/src/` |
+| M2-7 | 安全基线落地：调用参数**数组化**（不拼命令行）、路径规范化、失败日志脱敏 | `crates/zsdesk-ui/src/external.rs` |
 
 ### 3.2 验收标准
 
@@ -211,7 +223,7 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | M3-6 | **Listary 集成**（C# 插件，`native/listary`） | `window/listary.rs` |
 | M3-7 | **腾讯桌面布局迁移** | `desktop/migration.rs`、`desktop/tencent_import.rs` |
 | M3-8 | **文件位置转发** + Win+E 桥接 | `explorer_forwarder.rs`、`win_e_bridge.rs`、`routing_control.rs` |
-| M3-9 | **收口**：移除 `zsui` path 依赖（C4 过渡期结束） | `crates/zc-app/Cargo.toml` |
+| M3-9 | **收口**：移除 `zsui` path 依赖（C4 过渡期结束） | `crates/zsdesk-app/Cargo.toml` |
 | M3-10 | 完整回归 + 便携包 + Release + SHA-256 manifest | `scripts/package-portable.ps1`、`.github/workflows/release.yml` |
 
 ### 4.2 验收标准
@@ -264,7 +276,7 @@ M3 的「删 zsui」依赖 M1+M2 全部迁完。**并行会产出「改坏了也
 
 | 里程碑 | 明确不做 |
 |---|---|
-| M0 | 不做任何业务功能；不改 `crates/**` 下的上游 `.rs`（只新建 `zc-*`）；不删 `zsui` 依赖 |
+| M0 | 不做任何业务功能；不改 `crates/**` 下的上游 `.rs`（只新建 `zsdesk-coreui` 不依赖任何 `zsdesk-*`）；不删 `zsui` 依赖 |
 | M1 | 不做写操作（新建/重命名/删除/剪贴板）；不做右键菜单的动作项（只验证弹出与置灰）；不做预览；不做搜索；不做桌面格子 |
 | M2 | 不做进程内图片解码；不做 Office/WPS/PDF 进程内渲染；不做 EXIF 面板 |
 | M3 | 不做 32 位 x86；不做 `standard`/`network`/`desktop`/`themed`/`desktop-box` 单版 |
