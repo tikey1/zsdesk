@@ -1,32 +1,71 @@
-<window title="关于 tabbed_files" width="520" height="420">
-  <!--
+<!--
     D-02-C / R2-a / R2-b: third-party component list, readable at runtime.
     Static text only. D-15: no event attributes, no business scripts.
     ASCII verification markers (for scripts/verify.ps1 check 05):
     R2-a / Branch A / ghboke/core-ui / 1.9.0.346 / MIT / custom build / license scope confirmed.
-  -->
-  <style>
-    window { background: var(--content-bg); color: var(--text); }
-    .heading { padding: 12px; font-size: 16px; font-weight: 600; }
-    .row { padding: 4px 12px; color: var(--text-secondary); }
-  </style>
-  <template>
-    <vbox>
-      <text class="heading" text="tabbed_files 1.2.3" />
-      <text class="row" text="单进程 · Core UI · Rust 原生标签页文件管理器" />
-      <separator />
-      <text class="row" text="Core UI 1.9.0.346 — MIT — https://github.com/ghboke/core-ui" />
-      <text class="row" text="随附版本为 GuoheView 定制构建（custom build）：含 ui_gh_img_view_* 等专有扩展导出" />
-      <text class="row" text="许可覆盖已确认：上游为标准 MIT（无附加限制），定制构建属其衍生修改，可随包分发" />
-      <text class="row" text="lunasvg — MIT — 内嵌于 core-ui.dll — SVG 光栅化" />
-      <text class="row" text="QuickJS-NG — 内嵌于 core-ui.dll — 仅求值静态布局与主题 token" />
-      <text class="row" text="windows crate 0.61.3 — MIT / Apache-2.0 — 仅 FFI 绑定，不分发二进制" />
-      <text class="row" text="VC++ 运行库 / UCRT — R2-b Branch A（系统已装）— 不随附，由系统 System32 提供" />
-      <text class="row" text="GuoheView.exe — 外部可选程序 — 不随附、不写注册表、不接管文件关联" />
-      <text class="row" text="ghde.dll — 可选增强，默认关闭；guohe-view-thumb.dll — 不使用" />
-      <text class="row" text="无 Chromium / WebView2 / CEF / Electron / V8 / Node 运行时" />
-      <separator />
-      <text class="row" text="致谢 ZSDesk — MIT — https://github.com/qiu7824/zsdesk — 借鉴其 CI / 打包实践" />
-    </vbox>
-  </template>
-</window>
+
+    ---------------------------------------------------------------------------
+    2026-11-13  core-ui 标签修正
+    依据：docs/11-COREUI-MARKUP-TAGS.md
+    权威源：上游 core-ui src/ui/page/widget_factory.cpp → ConstructByTag
+    ---------------------------------------------------------------------------
+    一、标签替换（设计意图 / 尺寸 / 间距 / 配色一律不动）
+        <vbox>       ×1 → <div>
+        <text>      ×13 → <label>（长条目，需要占满宽度并换行）
+        <separator> ×2 → <div class="divider">（见下 §2.6）
+      模板体元素数不变（16 → 16；连 <window>/<style>/<template> 三个 SFC
+      外壳一起算是 19 → 19）。
+      说明：core-ui 的 span / label 落到同一分支（LabelWidget，wrap=true，
+      display=inline），行为一致；「占满宽度 / 可换行」由 CSS display: block
+      决定 —— 关于面板的条目都是长句，若不占满宽度会横向溢出窗口而不换行。
+
+    二、结构级修正
+      1. <window> 必须自闭合，<style>/<template> 提到顶层
+         （上游 sfc_parser.cpp：非自闭合 → SFC parse failed，整页不加载）。
+      2. 文本写在元素内部；text="..." 属性在 .uix 只对 <menu> 生效。
+      3. window { ... } 选择器不匹配任何控件 → 落到根节点 class="root"。
+      4. core-ui 无 CSS 属性继承 → 每个有文字的 class 各自声明 color。
+      5. <separator> → <div class="divider">：SeparatorWidget::OnDraw
+         （上游 controls.cpp:635-643）不调用 Widget::OnDraw，CSS background
+         永远不会被画出来，线条颜色写死 theme::kDivider()（light #D1D1D1 /
+         dark #424242）。要让分隔线走项目 token --app-divider 必须用 div。
+         上游 demo 同款做法：<div class="sep"/> + height:1 + background。
+
+    三、主题 token：全部改用 --app-* 前缀，避开 core-ui 自有的 34 个库 token，
+      详见 docs/12-UIX-TAG-FIX.md 与 assets/themes.json。
+-->
+<window title="关于 tabbed_files" width="520" height="420" />
+<style>
+  /* 根容器：原 window { ... } 规则（<window> 是 SFC 外壳，选择器不匹配控件）。
+     font-family 只是设计记录 —— core-ui 只在 SVG 文本路径读该属性，普通
+     LabelWidget 一律走 ui_theme_set_default_font 设的字体（见 docs/12 §1）。 */
+  .root { background: var(--app-content-bg); color: var(--app-text); font-family: "Segoe UI Variable", "Segoe UI"; }
+
+  .heading { display: block; padding: 12px; font-size: 16px; font-weight: 600; color: var(--app-text); }
+  .row { display: block; padding: 4px 12px; color: var(--app-text-secondary); }
+
+  /* 水平分隔线 1px：必须用 <div> 而不是 <separator> ——
+     SeparatorWidget::OnDraw（controls.cpp:635-643）不调用 Widget::OnDraw，
+     CSS background 永远不会被画出来，线条颜色写死 theme::kDivider()。
+     上游 demo 同款做法：<div class="sep"/> + height:1 + background。 */
+  .divider { height: 1px; background: var(--app-divider); flex-shrink: 0; }
+</style>
+<template>
+  <div class="root">
+    <label class="heading">tabbed_files 1.2.3</label>
+    <label class="row">单进程 · Core UI · Rust 原生标签页文件管理器</label>
+    <div class="divider" />
+    <label class="row">Core UI 1.9.0.346 — MIT — https://github.com/ghboke/core-ui</label>
+    <label class="row">随附版本为 GuoheView 定制构建（custom build）：含 ui_gh_img_view_* 等专有扩展导出</label>
+    <label class="row">许可覆盖已确认：上游为标准 MIT（无附加限制），定制构建属其衍生修改，可随包分发</label>
+    <label class="row">lunasvg — MIT — 内嵌于 core-ui.dll — SVG 光栅化</label>
+    <label class="row">QuickJS-NG — 内嵌于 core-ui.dll — 仅求值静态布局与主题 token</label>
+    <label class="row">windows crate 0.61.3 — MIT / Apache-2.0 — 仅 FFI 绑定，不分发二进制</label>
+    <label class="row">VC++ 运行库 / UCRT — R2-b Branch A（系统已装）— 不随附，由系统 System32 提供</label>
+    <label class="row">GuoheView.exe — 外部可选程序 — 不随附、不写注册表、不接管文件关联</label>
+    <label class="row">ghde.dll — 可选增强，默认关闭；guohe-view-thumb.dll — 不使用</label>
+    <label class="row">无 Chromium / WebView2 / CEF / Electron / V8 / Node 运行时</label>
+    <div class="divider" />
+    <label class="row">致谢 ZSDesk — MIT — https://github.com/qiu7824/zsdesk — 借鉴其 CI / 打包实践</label>
+  </div>
+</template>

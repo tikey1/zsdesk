@@ -19,6 +19,16 @@
   - [ ] 已调用 `ui_theme_set_mode(...)` 并与系统主题一致
   - [ ] 打印 `ui_page_last_error(page)` 的值并记录（应为**空**）
   - [ ] `scripts/verify.ps1` 的 D-15 检查（零事件属性 / 零业务脚本）通过
+  - [ ] **【P0】`:root` 块拼进了 `<style>` 块【内部】**，而不是源码顶层
+        —— 顶层注入 → `sfc_parser.cpp:260-266` 判 "unexpected content at top level"
+        → "SFC parse failed" → **三个窗口一个都出不来**（报错不像标签问题，极易误判）
+  - [ ] **【P0】`:root` 块确实注入了**（而不是没注入）
+        —— 没注入是**静默**的：界面出得来，但 `var(--app-*)` 解析成空串
+        （`cascade.cpp:79-81` → `ParseColor("")` 失败）→ 全是库默认色
+        （纯白底 / `#424242` 文字 / `#D1D1D1` 分隔线）
+  - [ ] **【P0】注入发生在 `ui_page_load_string` 之前**（时序错了同上，静默回落库色）
+  - [ ] **【P0】切主题若走「重建页面」：旧 page 已 `ui_page_destroy` + 27 个句柄全部重取**
+        —— 新 page ⇒ 旧 `ui_widget_find_by_id` 句柄全部失效，继续用会写到野内存
 
 > **重要**：第 0 项的 4 条只要少做一条，后面「颜色 / 字体 / 深浅色」的条目会**全部误报**。先确认这 4 条再做。
 
@@ -96,7 +106,7 @@
 | L6 | 右侧预览窗格宽度 | 320px | 同上 |
 | L7 | 中间列表区宽度 | 剩余全部（`flex: 1`） | 被挤 → `.list-host` 缺 `flex: 1` |
 | L8 | 竖分隔线 | 2 条，各 1px 宽，通高 | 见 M06 |
-| L9 | 水平分隔线 | 4 条（标签栏下 / 命令栏下 / 地址条下 / 状态栏上），各 1px 高，通宽 | 线不见了 → `.divider` 的 `background` 未生效（M04）或分隔线被 0 高容器裁掉 |
+| L9 | 水平分隔线 | 4 条（标签栏下 / 命令栏下 / 地址条下 / 状态栏上），各 1px 高，通宽，颜色 `--app-divider`（浅 `#E0E0E0`） | 线不见了 → ① `.divider` 的 `height: 1px` 有没有被 `flex-shrink` 压成 0（已加 `flex-shrink: 0`）② `--app-divider` 有没有注入成功（M04）③ **注意：本轮已把 `<separator>` 全换成 `<div>`** —— `<separator>` 不画 CSS background（`controls.cpp:635-643`），用它永远拿不到项目 token |
 | L10 | 信息条 | 默认**收起**（0 高，看不到）；`.infobar-visible` 时 36px | 一直显示 → `.infobar` 的 `height: 0px` 被覆盖 |
 | L11 | 状态栏高度 | 28px，片段左对齐、间距 12px | 片段被拉散 → `.status-segment` 缺 `white-space: nowrap` 或被当成 block |
 | L12 | 整体无滚动条 | 1200×800 下不应出现纵向滚动条 | 出现 → 某处 `flex: 1` 缺失，或固定高度总和 > 800 |
@@ -121,7 +131,7 @@
 |---|---|---|---|
 | F1 | 正文字体 | 拉丁 Segoe UI Variable（Win11）/ Segoe UI（Win10）；中文 Microsoft YaHei UI | 字体没变 → Rust 没调 `ui_theme_set_default_font` / `ui_theme_set_cjk_font`（**`.uix` 里的 `font-family` 对普通 LabelWidget 不生效**，只对 SVG 文本生效） |
 | F2 | 标题栏应用名字号 | 13px | 偏大/偏小 → `.app-title { font-size: 13px }` 未生效 |
-| F3 | 关于面板标题字号 | 16px、粗体 | 同上（`.heading`） |
+| F3 | 关于面板标题字号 | 16px、**不加粗**（`font-weight: 600` 在 core-ui 是空声明，见 F6） | 同上（`.heading`） |
 | F4 | 长文本是否被截断成省略号 | 状态栏片段过长时显示 `abc...` 而非折行 | 折行 → `.status-segment` 缺 `white-space: nowrap` |
 | F5 | 中文与英文混排 | 无豆腐块、无基线跳动 | 豆腐块 → 缺 `ui_theme_set_cjk_font` |
 | F6 | 预览窗格标题「预览」、关于面板标题「tabbed_files 1.2.3」 | **当前预期是不加粗** —— `font-weight: 600` 在 core-ui 是空声明（只认 `bold`/`700`，`widget_factory.cpp:1392-1395`），见 `docs/12` §5 R8。**若真机上标题明显不粗，不是 bug，是待裁决项** | 要强调有三条路：改 `bold`（超 docs/07 字重上限）／把标题字号提到 14px 靠字号做层级（推荐）／保持现状 |
@@ -144,7 +154,7 @@
 | C2 | 切深色后**库控件**（按钮/输入框/焦点环）是否变深 | 跟随系统 | 不变 → 没调 `ui_theme_set_mode` |
 | C3 | accent 在两个模式下 | 浅 `#2563EB` / 深 `#60A5FA`；且**自绘区与按钮是同一个蓝** | 深色下变成 `#3971EC` → Rust 切 mode 后**没有重新调** `ui_theme_set_accent_hex`（切 mode 只保留 accent override 的**值**，不会自动换成另一套色值） |
 | C4 | 切深色后是否有**半深半浅**（一半新一半旧） | 全套一起变 | 半深半浅 → 只切了库没重建页面（C1），或重建了但没先 `ui_theme_set_mode` |
-| C5 | 深色下分隔线是否还可见 | `#3D3D3D` 可见但不刺眼 | 看不见 → 检查 `--app-divider` 是否注入成功 |
+| C5 | 深色下分隔线是否还可见 | `#3D3D3D` 可见但不刺眼 | 看不见 → 检查 `--app-divider` 是否注入成功（`<separator>` 本来是库色 `#424242`，本轮已全改 `<div>`，所以这里应是项目 token 色；**若看到 `#424242` 说明还是 `<separator>` 或 token 没注入**） |
 
 ## 7. 加载与错误处理
 
@@ -162,7 +172,9 @@
 
 - **P0（阻断）**：E1 非空 / E3 无窗口 / M04 全是库默认色 / H2~H4 任一空白 / L1~L12 任一尺寸错 → **先别往下走**，按定位列逐条查。
 - **P1（必须修）**：C1~C5 深浅色问题 / D1 分隔线在 150% 消失 / F1 字体不对。
-- **P2（可记账）**：细节色差（如分隔线 #D1D1D1 vs #E0E0E0）、工具条留白等。
+- **P2（可记账）**：工具条留白等细节。
+  （**分隔线色差不再是 P2** —— 第二轮已把 `<separator>` 全换成 `<div>`，
+  分隔线现在走项目 token `--app-divider`，与设计稿一致；见 §2.6 / L9 / C5。）
 
 **回退点**：本轮改动已全部落盘且**元素总数不变**（main 33 / preview 12 / about 19），id 一个没动，
 出现系统性偏差时可直接 `git checkout HEAD -- assets/main.uix assets/preview.uix assets/about.uix assets/themes.json`
@@ -178,6 +190,12 @@
 4. **`:root` 注入的时序**：必须在 `ui_page_load_string` 之前；晚一步就静默用库默认色（M04）。
 5. **`ui_theme_set_mode` 之后自绘区与库控件是否出现两种蓝**（C3/C4）——accent override 的实际保留行为。
 6. **1px 线在 150% / 200% DPI 下的可见性**（D1）。
+   （**分隔线颜色已不再是待验项** —— 第二轮把 `<separator>` 换成 `<div>` 后，
+   分隔线走项目 token `--app-divider`，不再是库色 `#D1D1D1` / `#424242`。
+   但「1px 实心 div 在各 DPI 下是否看得见」仍需真机看。）
 7. ~~`TextInputWidget` 是否会用库默认 `inputBg` 盖掉 CSS 的 `background`~~ → **已查实：不会**（`controls.cpp:1052-1063` 优先用 CSS 的 `bgColor`）；**残留问题是这三个输入框因此没有 hover / focus 底色变化**（见 F7）。
 8. **`font-weight: 600` 是否真的不加粗** → 源码已答：**不加粗**（只认 `bold`/`700`）。需要设计师裁决的是「要不要改」，不是「是不是加粗」（见 F6 / `docs/12` §5 R8）。
 9. **`<input>` 的默认圆角**：core-ui 未设 `border-radius` 时用 `theme::radius::medium`（`controls.cpp:1047`），与 docs/07「控件圆角 4 px」是否一致 —— 需真机看一眼。
+10. ~~**根 `<div class="root">` 是否铺满窗口**~~ → **已结案**：`src/ui/ui_window.cpp:1533`
+    `root_->rect = {0, 0, size.width, size.height}` ⇒ 根控件铺满客户端区，
+    `.root` 的 `background: var(--app-bg)` 会被整块画出。（QA S5 提供，我的独立查证一致。）

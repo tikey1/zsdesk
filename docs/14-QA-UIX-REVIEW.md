@@ -588,3 +588,119 @@ $ python3 scripts/gates/theme_contrast_check.py
 本报告 §2 只贴了三条**实际执行**的命令及其真实输出；`docs/12` §6 无法复现的输出块被判为 **P1-C**；
 按 `references/50-design-systems/ui-acceptance.md §七 截图存档`，§5 把三张基准截图列为不可省略的交付项，
 并按 `references/10-standards/contract-prose.md §二.4 有界输出，给指针不给倾倒`，超长明细落在本文件，回传给主理人的摘要只给结论 + 位置。
+
+---
+
+## 8. 第二轮复核结论（B2 已确认 · B1/B3/I1–I5 逐条裁定）
+
+> 本节是 QA 在第一轮意见落地后的复跑记录。§1–§7 是第一轮裁定，**未改动**。
+> 裁决来源：交付总监（team-lead）第二轮决策 + QA 独立复核。
+
+### 8.1 B2（`<separator>` 的 CSS `background` 无效）—— ✅ 已确认修复
+
+| 项 | 结果 |
+|---|---|
+| 三个文件的**真实 `<separator>` 元素**（剥 HTML 注释 + CSS 注释后统计） | main **0** / preview **0** / about **0** ✅ |
+| 替代写法 | `<div class="divider" />` + `.divider { height: 1px; background: var(--app-divider); flex-shrink: 0; }` ✅ |
+| QA 自写门禁 `qa_uix_verify.py` 的对应 WARN | **已消失** ✅ |
+| 其余结构性判定（标签 / 旧标签 / 元素数 / id / D-15 / 自闭合 / 硬编码色 / var() / G05） | **全部仍 PASS** ✅ |
+
+**连带修对了 `docs/13` 两处期望值**（原先是错的，改成 `<div>` 后反而成立）：
+- M04 ④「分隔线是不是 `#E0E0E0`」→ 现在**正确**（div 会画背景）✅
+- C5「深色下分隔线 `#3D3D3D`」→ 现在**正确** ✅
+
+### 8.2 B1（`:root` 注入位置）—— ✅ 点 1 已落地；点 2/3 由构造保证；点 4 尚无落点
+
+定稿四点逐条核对 `assets/themes.json` 的 `revision` 段：
+
+| B1 点 | 核对结果 |
+|---|---|
+| 1. 拼进 `<style>…</style>` 块**内部**，禁止源码顶层 | ✅ **已落地**。`revision.inject` 已改写为「必须注入到 `<style>` 块【内部】（紧跟 `<style>` 开头），**绝不能**放在源码顶层」，并引用 `sfc_parser.cpp:260-266` 的判据 |
+| 2. `:root` 内只允许 CSS 变量声明 | ✅ **由构造保证**。`themes.json` 的 17 个键**全部**是 `--app-*` 自定义属性，无 `background`/`color`/`font` ✅ |
+| 3. 根节点的 `background`/`color`/`font-family` 走根 `<div class="root">` 的 class 规则 | ✅ **已满足**。三个文件的 `.root` 规则都带 `background` + `color`（`font-family` 是设计记录，不生效但无害） |
+| 4. Rust 侧加载前 **fail-fast 自检**（校验 `:root` 位置在 `<style>` 之内） | ⛔ **尚无落点**。`crates/` 下现为 `zsdesk-app` / `zsdesk-core` / `zsdesk-platform` / `zsdesk-ui` / `zsdesk-windows` —— **没有 `zsdesk-coreui`**（绑定层未落地）→ 建议与 `docs/12` §5 的 R1–R4 同批登记为 Rust 侧待办 |
+
+**另确认**：`revision.switch` 已补上 I3 的句柄失效说明（「旧的 27 个 `ui_widget_find_by_id` 句柄全部失效 → 必须重取全部句柄并销毁旧 page；`ui_page_reload` 会重放旧源码，改不了 palette」）✅
+
+### 8.3 B3（`docs/12` §6 的输出块不可复现）—— ⛔ 仍开着
+
+需前端二选一：重贴当前真实输出，或按 `contract-prose.md §二.4` 改为「命令 + 判定 + 退出码」、输出交 CI 存档。
+
+### 8.4 I1 / I2（`docs/11`）—— ✅ 已回填，QA 复核通过
+
+| 项 | 复核结果 |
+|---|---|
+| §2 计数表 | ✅ 全部正确（`<text>` 7 / `<text-input>` 3 / `<hbox>` 7 / `<vbox>` 1 / `<vseparator>` 2 / `<panel>` 4 / `<separator>` 4 / `<label>` 2），并已加「只统计开标签」说明 ✅ |
+| M01 | ✅ QA 回填：未知标签 → `widget_factory.cpp:1192-1193` → **空 VBox，静默不报错不崩溃** |
+| M06 | ✅ 前端已回填，结论与 QA 独立判定**逐条一致**（含 `<separator>` 背景永不生效、线条色写死 `theme::kDivider()`、light `#D1D1D1` / dark `#424242`） |
+
+**🆕 新发现的一处口径冲突**（建议一并回填）：
+
+> 同一个「元素总数」现在有**三个值**：
+> - `docs/11` §2 下方：**34 / 12 / 19**（= 全部开标签，含 `window`/`script`/`style`/`template` 四个 SFC 外壳标签）
+> - `scripts/gates/uix_tag_check.py`：**33 / 12 / 19**（= 开标签，但剥掉了 `<script>` 块）
+> - QA `docs/14` §1.6：**30 / 9 / 16**（= **模板体**元素数，不含 SFC 外壳标签）
+>
+> 三个值各自自洽，但**没有一处写明口径** → 建议统一采用 **「模板体元素数」= 30 / 9 / 16**（这才是「不增删元素」讨论的对象），并在三处都写明「不含 4 个 SFC 外壳标签」。
+
+### 8.5 I4（字重 600 空声明）—— ✅ 已裁决采纳 (c)，⏳ 待前端落地
+
+**裁决**：采纳选项 (c)（标题删掉 `font-weight`、字号提到 14px、靠字号 + 颜色做层级）。
+**依据**：`docs/07-UI-DESIGN-WINUI3.md` §4「字重仅 400/500」，而 core-ui 只认 `bold`/`700`（`widget_factory.cpp:1392-1394`）→ **500 同样是空声明** → 两条路都违反文档 → 靠字号 + 颜色是唯一同时满足「不改用户设计约束」与「core-ui 能力边界」的做法。
+
+**待前端落地的三处**（QA 不自行改）：
+1. `assets/preview.uix` `.preview-title`、`assets/about.uix` `.heading`：删 `font-weight: 600`，字号按 `docs/07` 提到 **14px**
+2. `docs/13` **F3**（现写「16px、**粗体**」）→ 改成「14px、**不加粗**、靠颜色做层级」
+3. `docs/13` **F6**（现写「当前预期是不加粗 …… 是**待裁决项**」）与 **§9 第 8 条**（现写「需要设计师裁决的是要不要改」）→ 改成「**已裁决采纳 (c)**」
+
+**QA 复核状态**：⏳ **未落地**，前端改完后复跑 `qa_uix_verify.py`（`font-weight: 600` 的两条 WARN 应消失）。
+
+### 8.6 I5（G05 验错对象）—— ✅ 已由前端落地，QA 复核通过，数字完全吻合
+
+`scripts/gates/theme_contrast_check.py` 已重写为 **DOM 树遍历口径**（class 规则解析 + 最近祖先-or-self 的 `background` + 库默认兜底），不再是「只对比 themes.json 里的 token 组合」。
+
+**实跑真实输出**：
+
+```
+=== G05 双主题对比度（按 .uix 真实渲染关系计算）===
+  [light] 真实文字元素 55 处，最低 5.78:1（span.app-title #616161 on #F7F7F7）
+        assets/main.uix span.app-title: #616161 on #F7F7F7 = 5.78:1 「tabbed_files」
+        assets/main.uix label.nav-hint: #616161 on #F7F7F7 = 5.78:1 「后退 前进 上级 刷新 · 查看 排序 预览」
+        assets/preview.uix label.preview-hint: #616161 on #FBFBFB = 5.98:1 「选中单个文件以预览」
+  [dark] 真实文字元素 55 处，最低 6.75:1（span.app-title #B3B3B3 on #2B2B2B）
+        ...
+PASS —— 真实文字元素的对比度全部 ≥ 4.5:1，间距取值全部在刻度上。
+```
+
+- ✅ 输出已按要求列出**真实元素 × 背景 × 比值 + 文本片段**
+- ✅ **light 5.78:1 / dark 6.75:1 与 QA 独立复算的数字完全一致**（`qa_uix_verify.py` 同口径得出同样的 5.78 / 6.75）
+- ✅ 库默认兜底值经核对**正确**：`LabelWidget` 无 `color` 规则时用 `theme::kBtnText()`（`controls.cpp:61-68`）= light **`#242424`**（grey::g14）/ dark `#FFFFFF`；窗口底兜底 light `#FFFFFF` / dark `#292929`
+- ✅ G13 间距刻度仍 0 处非刻度
+
+### 8.7 I3（切主题后 27 个句柄失效）—— ⛔ `docs/13` 缺一条验证步骤
+
+**现状**：`docs/13` 的 C1 只写了「必须按 `docs/12` §4.4 **重建页面**（重注 `:root` + `ui_page_load_string`）」，
+但**没有任何一条检查重建后句柄是否重取**；H1 只覆盖**首次**加载的 27 个 id。
+
+**建议在 `docs/13` §6（深浅色切换）补一条**（QA 不自行改 docs/13 —— 前端所有）：
+
+| # | 看什么 | 期望 | 异常怎么定位 |
+|---|---|---|---|
+| **C6** | 切深色**并重建页面之后**，27 个 id（main 21 + preview 6）是否仍全部能 `ui_widget_find_by_id` 取到 | 全部命中 | 取不到 → Rust 侧没在重建后重新绑定句柄，仍拿着旧 page 的悬空句柄 |
+
+### 8.8 撤回我自己的两条 S2（数字类断言必须自己实测）
+
+| 我在第一轮提的 | 复核结果 | 处置 |
+|---|---|---|
+| 「`docs/11` §3 的 `ui_debug_*` 71 个 → 应为 72」 | **我错了**。实测 `include/ui_core.h` 中 `UI_API` 声明的唯一 `ui_debug_*` 符号恰为 **71** 个（第 72 个只出现在注释里）→ docs/11 写的 71 **正确** | **撤回** |
+| 「`docs/11` §6 的 `value.h:91` → 应为 93」 | **我错了**。`value.h:91` 正是 `// Resolve a var(--name) reference…` 注释行，`:93` 是声明行 → 引用 91 **合法**（team-lead 已自行改为 91-93） | **撤回** |
+
+**教训**：数字类断言必须**自己实测**，不能凭印象 —— 这两条都是我凭印象写的，核一下就发现是错的。
+
+### 8.9 一处 `docs/12` 的数字需要更正（P3）
+
+`docs/12` §2.4 写「库默认文字色是 `contentText = #424242`（light，`theme.h` grey::g26）」→ **数字错**。
+`LabelWidget` 无 `color` 规则时用 `theme::kBtnText()`（`controls.cpp:61-68`）= **`#242424`**（grey::g14）。
+结论方向不变（都偏灰、都比 `--app-text` 浅一档），但数字要改。
+
+---

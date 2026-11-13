@@ -88,7 +88,7 @@ job package  needs: [rust, core-ui]
 
 | # | 目标态 | 当前态 | 判定 |
 |---|---|---|---|
-| 9 | 用上游 `scripts/build-clang-cl.ps1 -Target core-ui`（不重写上游构建逻辑） | 已实现 | ✅ |
+| 9 | **契约约束的是「构建结果」，不是「调用哪个脚本」** —— D03 已明确「core-ui 自身无构建工作流，这套步骤要我们自己维护」。当前实现调用上游 `scripts/build-clang-cl.ps1 -Target core-ui`；**若 H1 成立（见 §5）则改为 CI 直接调 cmake** | 已实现（用上游脚本） | ✅ / ⚠️ 见 §6 |
 | 10 | `llvm-rc` 缺失即失败（Windows SDK 的 `rc.exe` 10.0.26100 在 ninja 子进程会挂起） | `Locate clang-cl and llvm-rc`，缺 llvm-rc 直接 throw，并注释说明「不能静默退回 rc.exe」 | ✅ |
 | 11 | 构建前清掉 `clang-cl-build/`（上游脚本**目录存在就跳过 configure** → 会用旧配置产物） | `Clean the build directory` | ✅ |
 | 12 | core-ui 用 `FetchContent` 现场拉 QuickJS-NG → CI 需预置源码 | `Pre-fetch QuickJS-NG into the FetchContent slot`（`git clone --depth 1 --branch v0.14.0 --recurse-submodules` → `_deps/quickjs-src`） | ✅ **这是第 12 步失败的加固** |
@@ -104,8 +104,8 @@ job package  needs: [rust, core-ui]
 | 17 | **G2b 戳记**：打包写出 `core-ui.dll.revision`，运行时比对 | 打包拷 `app/target/release/core-ui.dll.revision`（**若存在**）→ 戳记由 Rust 侧 build.rs/构建产出 | 🟡 **戳记的产出方要定**（见 §5.2） |
 | 18 | **S7 CRT 动态性**：导入表必须含 `MSVCP140.dll` + `VCRUNTIME140.dll` | `Gate S7 — core-ui.dll must link the dynamic VC++ runtime`（dumpbin 判定） | ✅ |
 | 19 | **S12 同目录**：`core-ui.dll` 与 exe 同目录 | `Gate S12` | ✅ |
-| 20 | **S7' 导出面**：CI 编出的 DLL 的 `ui_*` 集合 vs `docs/05-COREUI-EXPORTS.txt`，差异 ⊆ {`ui_core_embed_binary`, `ui_dialog`} | 未实现 | ⛔ 见 §5.3 |
-| 21 | **S8 绑定面**：绑定层声明 ⊆ 实测导出集合；必需∩可选=∅；必需不含 12 个「本机独有」符号 | 未实现 | ⏳ **待绑定层落地后启用**（`spec/rust-ffi-skeleton/` 合并进 `crates/zsdesk-coreui/` 之后） |
+| 20 | **S7'-第一段**：CI 编出的 DLL 的 `ui_*` 导出集 vs `docs/05-COREUI-EXPORTS.txt`（567 个）；**判据按实测符号集**（PM 扫 pinned revision 全 `src/` 的 `UI_API` → 567，与本机 DLL 双向差集为空，仅 `ui_dialog` 例外）→ 断言「CI 产物的 `ui_*` 集 ⊇ 本机 567（允许 `ui_dialog` 缺）」且「差集 ⊆ {`ui_core_embed_binary`}」 | 未实现 | 🟡 **建议本版就加**（不需要绑定层落地） |
+| 21 | **S7'-第二段 / S8 绑定面**：绑定层**必需符号集** ⊆ S7' 实测导出集；必需 ∩ 可选 = ∅；可选里的 12 个「头文件漏声明」符号签名必须与 `src/ui/ui_api.cpp` 一致 | 未实现 | ⏳ **M1 加**（需绑定层先落地） |
 
 ### 3.4 打包
 
@@ -158,21 +158,36 @@ job package  needs: [rust, core-ui]
 → **契约要求**：戳记文件的内容必须 **== 编译期 `EXPECTED_REVISION`**；
 CI 侧加一条断言「打包进去的戳记 == `packaging/core-ui-revision.txt`」。
 
-### 4.3 ⛔ S7' 导出面（CI 编出的 DLL vs 导出表）
+### 4.3 🟡 S7' 导出面（CI 编出的 DLL vs 导出表）—— **两段，建议本版就加第一段**
 
 **为什么必须**：`Gate G2` 比的是**版本号**；但「同版本」不等于「同 API 面」。
 上游头文件**漏声明**了 12 个本机实际导出的符号（`docs/05-COREUI-ABI-NOTES.md` V04），
 说明**版本号与 API 面不是单调关系**。
 
-**判定规则**（可机械执行）：
+**★ 判据已按实测符号集更新（2026-11-13）**：PM 对 pinned revision `1840d689` 全 `src/`
+做 `UI_API` 扫描 → **567** 个 `ui_*`，与本机 DLL 的 567 个**双向差集为空**，
+仅 `ui_dialog` 例外（头文件有声明、源码自 build 158 已删）。
+→ 那 12 个「头文件漏声明」的符号**在仓库 main 的源码里也有** → **CI 产物同样有**。
+
+**第一段（🟡 建议本版就加 —— 不需要绑定层落地）**：
 
 ```
 CI 编出的 core-ui.dll → 导出表 → 取 ui_* 集合 C
 docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
-断言：L ⊆ C                      （本机有的，CI 产物也必须有）
-断言：C \ L ⊆ {ui_core_embed_binary, ui_dialog}   （仓库 main 多出来的只能是这两个）
-断言：C \ L 之外没有第三类差异
+断言：L 去掉 ui_dialog 后 ⊆ C              （本机有的，CI 产物也必须有）
+断言：C 去掉 L 后 ⊆ {ui_core_embed_binary}  （仓库 main 多出来的只能是这一个）
 ```
+
+> `ui_core_embed_binary` 其实是 **CMake 辅助函数**（`cmake/embed_binary.cmake`），
+> 不是 C API，从来不在任何 DLL 的导出表里 → 它不该出现在任何导出集合里。
+
+**为什么建议现在加**：① 纯 PE 导出目录解析，PowerShell 可独立完成；
+② **不需要绑定层落地** → 今天就能加；
+③ 它能**当场证伪**「CI 产物缺符号」这类问题 —— 而这正是当前 CI 卡住的那类问题。
+
+**第二段（⏳ M1 加 —— 需要绑定层先落地）**：
+绑定层的**必需符号集** ⊆ S7' 实测导出集；必需 ∩ 可选 = ∅；
+可选里那 12 个符号的签名必须与上游 `src/ui/ui_api.cpp` 一致。
 
 ### 4.4 ⛔ 静态门禁与 crate 依赖方向门禁
 
@@ -199,6 +214,26 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 **加法（M0 落地后）**：CI 里加一步 —— 把 exe 与 `core-ui.dll` 复制到临时目录 →
 删掉 `core-ui.dll` → 运行 exe → **断言退出码非 0 且 stderr 含 `core-ui.dll`**。
 
+### 4.6b 🟡 戳记的**断言**（口径「甲：Rust 产出」）
+
+**契约**：戳记由 **Rust 侧 `crates/zsdesk-coreui/build.rs`** 在编译期写出
+（内容 = `packaging/core-ui-revision.txt` 的 SHA + 一个换行，无 BOM；
+路径 = `target/<profile>/core-ui.dll.revision`，**与 exe 同目录**）。
+**CI 不自己写戳记**，只做**校验**：
+
+```
+打包后断言：
+  包内 core-ui.dll.revision 存在
+  且 其内容（去首尾空白）== packaging/core-ui-revision.txt 的内容（去首尾空白）
+  不等 → 打包失败
+```
+
+> **为什么不让 CI 写**：编译期常量 `EXPECTED_REVISION` 是唯一权威来源；
+> 若 CI 也写一次戳记，就有两个来源 → 运行时比对失去意义。
+>
+> 打包步骤**不用改**：现在的实现已经拷 `app/target/release/core-ui.dll.revision`
+> —— build.rs 写到那里正好被拷进 ZIP；只需**再加一条内容断言**。
+
 ### 4.6 一条**不属于 CI 但必须写进契约**的产品条款
 
 **Everything 引擎不入包**（已定）→ 用户的机器上**可能没有 Everything**。
@@ -210,10 +245,123 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 **不允许**因为 Everything 缺失就静默地「搜不出东西」。
 
 → **CI 侧对应冒烟项（M3）**：在**没有 Everything** 的 runner 上，搜索仍能返回结果。
+---
+
+## 5. ★ core-ui 构建失败的诊断（2026-11-13，基于上游源码的独立分析）
+
+> 背景：CI 已实跑两次，`rust` job 成功，**core-ui job 都挂在 `Build core-ui from source`**。
+> 第一次 run `43387095246`；第二次 run `43388501675`（**QuickJS 预置步骤成功** → 网络不是唯一原因）。
+> 第三次已推送（commit `0c20df7`，新增日志 artifact 与 step summary）。
+> 下面是架构侧基于**上游源码 + CMake 语义**给出的诊断，**按可能性排序**。
+
+### 5.0 先说结论
+
+> **预置 QuickJS 到 `_deps/quickjs-src` 这个做法本身是无效的** ——
+> 它既不能让 CMake 跳过下载，又额外拖慢一次克隆。
+> **CMake 的官方开关是 `-DFETCHCONTENT_SOURCE_DIR_QUICKJS=<路径>`。**
+
+### 5.1 H1 —— 预置路径无效，CMake 仍在自己下载（**最可能**）
+
+**依据（三条都可复核）**：
+
+| 事实 | 出处 |
+|---|---|
+| core-ui 的 CMakeLists 用 `FetchContent_Declare(quickjs GIT_REPOSITORY … GIT_TAG v0.14.0 GIT_SHALLOW TRUE)` + `FetchContent_MakeAvailable(quickjs)` | `CMakeLists.txt:41-52` |
+| 上游脚本 `build-clang-cl.ps1` 的 `$needsConfigure = -not (Test-Path (Join-Path $buildDir 'CMakeCache.txt'))` → **只要 build 目录存在就跳过 configure** | `scripts/build-clang-cl.ps1:103` |
+| FetchContent 是否需要下载，**由 `_deps/<name>-subbuild/<name>-populate-prefix/src/<name>-populate-stamp/` 下的 stamp 决定**，**不是**由 `_deps/<name>-src` 里有没有文件决定 | CMake `ExternalProject` 语义 |
+
+**因果链**：CI 每次删掉整个 `clang-cl-build/`（团队为了避免 stale `CMakeCache.txt`）→
+**stamp 全被删掉** → FetchContent 判定「未下载过」→ **重新 clone** →
+预置到 `_deps/quickjs-src` 的那份**被覆盖或白做**。
+
+> ★ 这解释了「预置步骤成功但构建仍失败」：
+> **预置成功 ≠ CMake 复用了它。**
+
+**正解（两种，推荐第二种）**：
+
+| 方案 | 做法 | 评价 |
+|---|---|---|
+| 甲 | 预置到 `_deps/quickjs-src`，并**保留 stamp 文件** | ✗ 依赖 CMake 内部 stamp 路径与文件名，**脆弱**；CMake 版本一变就失效 |
+| **乙（推荐）** | **改用 CMake 的官方覆盖变量**：FetchContent 的名字是 `quickjs` → 变量名大写 → **`-DFETCHCONTENT_SOURCE_DIR_QUICKJS=<绝对路径>`**。设了它，FetchContent **完全跳过 download step**（不 clone、不建 subbuild、不拷 `_deps`），直接就地编译该目录 | ✅ **官方机制**，跨 CMake 版本稳定 |
+
+> **障碍与绕法**：上游 `build-clang-cl.ps1` **不透传额外的 `-D`**（参数只有
+> `Target` / `Clean` / `StaticCrt` / `VsPath` / `ClangClPath`）。
+> → **绕法**：CI 里**不调用上游脚本**，直接调 cmake，参数照抄脚本（见 §5.4），
+> 追加 `-DFETCHCONTENT_SOURCE_DIR_QUICKJS=…`。vcvars 环境用 `ilammy/msvc-dev-cmd@v1`
+> 或复刻脚本里的 `cmd.exe /c "set … && vcvars64.bat >nul && set"` env 导入。
+>
+> **这不违反任何既有决策**：D03 原文就是「core-ui 自身无构建工作流，**这套步骤要我们自己维护**」。
+> 契约约束的是**构建结果**（x64 / `/MD` / 版本匹配 / 导出面一致），**不是调用哪个脚本**。
+
+### 5.2 H2 —— 预置用了 `--recurse-submodules`，会去克隆一个巨大的无用仓库
+
+**依据**：quickjs-ng v0.14.0 的 `.gitmodules` 内容（已核实）：
+
+```
+[submodule "test262"]
+	path = test262
+	url = https://github.com/tc39/test262.git
+	shallow = true
+	update = none
+```
+
+**只有一个 submodule `test262`，且 `update = none`** → **构建根本不需要它**
+（它是 JS 引擎的测试套件）。
+
+→ **预置 clone 里的 `--recurse-submodules` 应当去掉**。
+否则会额外浅克隆 tc39/test262（体量极大）→ **慢、超时、或把 runner 的时间/带宽吃光**。
+
+→ 预置应当用不带 `--recurse-submodules` 的浅克隆（指定 `--branch v0.14.0` + `--depth 1`）。
+
+### 5.3 H3 —— 真正的 C++ 编译 / 配置错误（若 H1/H2 都不是）
+
+**诊断方法**（run 3 的 artifact 里有完整日志）：
+
+| 日志特征 | 含义 | 处置 |
+|---|---|---|
+| `error:` 开头的**第一条**（不是 warning） | 真实的编译错误 | 按错误信息定位；quickjs-ng 的 C 代码与 clang-cl 的兼容问题最常见 |
+| `CMake Error at …FetchContent` / `git clone` / `fatal:` | 下载路径失败 | 回到 H1（用 `-DFETCHCONTENT_SOURCE_DIR_QUICKJS` 彻底不下载） |
+| `LNK2038` / `RuntimeLibrary mismatch` | CRT 不一致 | 确认没传 `-StaticCrt`，且 core-ui 与 quickjs 的 CRT 选项一致 |
+| `rc.exe` 挂起（步骤无输出直到超时） | 资源编译 | 已被 llvm-rc 硬失败检查覆盖；若仍出现，确认 `CMAKE_RC_COMPILER` 真的传进去了 |
+| `ninja: build stopped` 前的 `FAILED:` 行 | 哪个 target 失败 | 记下 target 名 |
+
+> **诊断纪律**：只看**第一条** error。不要被后续上百条连锁错误带偏。
+
+### 5.4 若改为「CI 直接调 cmake」，参数照抄上游脚本
+
+```text
+cmake -S <core-ui 目录> -B <core-ui>/clang-cl-build -G Ninja
+      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_C_COMPILER=<clang-cl 前向斜杠路径>
+      -DCMAKE_CXX_COMPILER=<clang-cl 前向斜杠路径>
+      -DCMAKE_RC_COMPILER=<llvm-rc 前向斜杠路径>
+      -DFETCHCONTENT_SOURCE_DIR_QUICKJS=<预置的 quickjs 源码绝对路径>
+cmake --build <core-ui>/clang-cl-build --target core-ui
+```
+
+**要点**：
+
+1. `-DCMAKE_RC_COMPILER` **必须显式给 llvm-rc**（上游脚本只在 `llvm-rc.exe` 与 `clang-cl.exe`
+   同目录时才加这一项 —— 团队已有硬失败检查，✅）；
+2. **不加** `-DUI_CORE_MSVC_STATIC_CRT=ON`（保持 `/MD`，D00-5）；
+3. `FETCHCONTENT_SOURCE_DIR_QUICKJS` 的值应是**预置目录**，且该目录**必须在 `clang-cl-build/` 之外**
+   （否则被 clean 删掉）；
+4. 预置目录里要有 `CMakeLists.txt`（quickjs-ng 有）；
+5. `lunasvg` / `plutovg` 是 **vendored** 在 `third_party/lunasvg/`（含 plutovg 子目录）
+   → **不联网**，不需要额外处理（已核实 `CMakeLists.txt` 里只有 quickjs 一个 FetchContent）。
+
+### 5.5 与本契约的关系
+
+| 契约条目 | 状态 |
+|---|---|
+| 目标是「core-ui 从 pinned revision 构建出 x64 / `/MD` / 版本匹配的 DLL」 | **不变**（§3.2 第 9 行已改为约束结果而非调用方式） |
+| 「用上游脚本」 | **降级为「当前实现」**，不再是契约要求 |
+| 门禁 G2 / S7 / S12 / G1 | **不变**，且与构建方式无关 |
+
 
 ---
 
-## 5. 一句话结论
+## 6. 一句话结论
 
 > **工作流主干与「产物可信」这一层（位数 / revision 版本 / 动态 CRT / 同目录 / assets 进包 /
 > manifest 版本列 / 干净构建 / llvm-rc 硬失败 / QuickJS 预置）已经到位** ——
@@ -225,7 +373,7 @@ docs/05-COREUI-EXPORTS.txt → 取 ui_* 集合 L（本机 DLL，567 个）
 
 ---
 
-## 6. 端到端验证（CI 必须能自证）
+## 7. 端到端验证（CI 必须能自证）
 
 ```powershell
 # ① Rust 侧（不需要 core-ui）
@@ -255,7 +403,7 @@ python3 scripts/gates/verify.py --phase 3        ⛔ 脚本不存在
 
 ---
 
-## 7. 本文件不做的事
+## 8. 本文件不做的事
 
 1. **不重写** CI 实现 —— 实现归运维，契约归架构；本文件只给判定与缺口。
 2. **不规定** 具体用 PowerShell / Python / bash 写哪个脚本 —— 只规定**判定什么**。
@@ -264,7 +412,7 @@ python3 scripts/gates/verify.py --phase 3        ⛔ 脚本不存在
 
 ---
 
-## 8. 关联文档
+## 9. 关联文档
 
 - `spec/ffi-core-ui.md` —— 动态加载、版本协商、revision 戳记（§5.5）、页面加载（§4.3.2）、`.uix` 三条硬约束（§4.3.3）
 - `spec/crate-layout.md` —— crate 划分、依赖方向（S9/S10 的对象）、`.uix` 资产约束

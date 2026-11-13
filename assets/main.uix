@@ -1,5 +1,4 @@
-<window title="tabbed_files" width="1200" height="800">
-  <!--
+<!--
     UI design v2 (Windows 10 / WinUI 3 style) - see docs/07-UI-DESIGN-WINUI3.md.
 
     D-15 / architecture 3.2: STATIC LAYOUT ONLY.
@@ -13,71 +12,166 @@
 
     First release is READ-ONLY: the command row intentionally contains no
     create / rename / delete / clipboard commands.
-  -->
-  <script>
-    const themeToken = "fluent2";
-  </script>
-  <style>
-    window { background: var(--bg); color: var(--text); font-family: "Segoe UI Variable", "Segoe UI"; }
-    .titlebar { height: 32px; background: var(--toolbar-bg); }
-    .app-title { padding-left: 12px; font-size: 13px; color: var(--text-secondary); }
-    .global-search { width: 280px; height: 26px; background: var(--content-bg); }
-    .tabbar { height: 36px; background: var(--toolbar-bg); }
-    .tab-active { color: var(--text); border-bottom: 2px solid var(--accent); }
-    .commandbar { height: 40px; background: var(--toolbar-bg); }
-    .cmd-button { width: 32px; height: 32px; }
-    .cmd-group { width: 8px; }
-    .addressbar { height: 36px; background: var(--content-bg); }
-    .breadcrumb { flex: 1; height: 26px; color: var(--text); }
-    .address { flex: 1; height: 26px; background: var(--content-bg); }
-    .search { width: 220px; height: 26px; background: var(--content-bg); }
-    .main-area { flex: 1; }
-    .nav-host { width: 220px; background: var(--sidebar-bg); }
-    .list-host { flex: 1; background: var(--content-bg); }
-    .preview-host { width: 320px; background: var(--sidebar-bg); }
-    .infobar { height: 0px; background: var(--info-bg); }
-    .infobar-visible { height: 36px; background: var(--info-bg); color: var(--text); }
-    .statusbar { height: 28px; background: var(--toolbar-bg); }
-    .status-segment { padding-left: 12px; color: var(--text-secondary); }
-    .divider { background: var(--divider); }
-  </style>
-  <template>
-    <vbox>
-      <hbox id="titlebar_host" class="titlebar">
-        <text class="app-title" text="tabbed_files" />
-        <text-input id="global_search" class="global-search" />
-      </hbox>
-      <hbox id="tab_host" class="tabbar">
-        <label id="tab_placeholder" text="标签页由 Rust 侧 TabManager 提供" />
-      </hbox>
-      <separator class="divider" />
-      <hbox id="command_host" class="commandbar">
-        <label id="nav_hint" text="后退 前进 上级 刷新 · 查看 排序 预览" />
-      </hbox>
-      <separator class="divider" />
-      <hbox id="address_host" class="addressbar">
-        <panel id="breadcrumb" class="breadcrumb" />
-        <text-input id="address" class="address" />
-        <text-input id="search" class="search" />
-      </hbox>
-      <separator class="divider" />
-      <hbox id="infobar_host" class="infobar" />
-      <hbox class="main-area">
-        <panel id="nav_host" class="nav-host" />
-        <vseparator class="divider" />
-        <panel id="list_host" class="list-host" />
-        <vseparator class="divider" />
-        <panel id="preview_host" class="preview-host" />
-      </hbox>
-      <separator class="divider" />
-      <hbox id="status_host" class="statusbar">
-        <text id="status_item_count" class="status-segment" />
-        <text id="status_selected" class="status-segment" />
-        <text id="status_text" class="status-segment" />
-        <text id="status_progress" class="status-segment" />
-        <text id="status_thumb_cache" class="status-segment" />
-        <text id="status_image_channel" class="status-segment" />
-      </hbox>
-    </vbox>
-  </template>
-</window>
+
+    ---------------------------------------------------------------------------
+    2026-11-13  core-ui 标签修正
+    依据：docs/11-COREUI-MARKUP-TAGS.md
+    权威源：上游 core-ui src/ui/page/widget_factory.cpp → ConstructByTag
+    ---------------------------------------------------------------------------
+    一、标签替换（设计意图 / 尺寸 / 间距 / 配色 / 层级一律不动）
+        <hbox>       ×7 → <div>，对应 class 补 flex-direction: row
+        <vbox>       ×1 → <div>
+        <panel>      ×4 → <div>
+        <text>       ×7 → <span>（短、单行、不占满宽度）
+        <text-input> ×3 → <input>
+        <vseparator> ×2 → <div class="vsep">
+        <separator>  ×4 → <div class="divider">（见下 §2.6）
+      模板体元素数不变（30 → 30；连 <window>/<style>/<template> 三个 SFC
+      外壳一起算是 33 → 33）。
+      说明：core-ui 的 span / label 落到同一分支（LabelWidget，wrap=true，
+      display=inline），两者行为一致；真正决定「换行 / 占满」的是 CSS 的
+      display 与 white-space，本文件据此逐个设置。
+
+    二、结构级修正（不改设计，只让 core-ui 真正认得）
+      1. <window> 必须自闭合，<script>/<style>/<template> 提到顶层。
+         上游 src/ui/uix/sfc_parser.cpp：非自闭合 → pushErr + 跳过到
+         </window> → SFC parse failed → 整页不加载（不是白屏局部缺失）。
+      2. .uix 的文本必须写在元素内部；text="..." 属性只对 <menu> 生效
+         （上游 FirstPlainText 只读子文本节点）。所有 text="..." 改为内部文本。
+      3. window { ... } 选择器不匹配任何控件（<window> 是 SFC 外壳，不是控件，
+         模板根节点才是根控件）→ 该规则落到根节点 class="root"。
+      4. core-ui 无 CSS 属性继承（IsInheritedProperty 未被任何路径调用），
+         所以颜色必须逐个 class 声明；本文件为每个有文字的元素补了 color。
+      5. 行容器补 align-items: center —— 32/36/40/28px 的条内控件（输入框、
+         标签、状态片段）默认会顶到上沿，与 docs/07 的条高规范不符。
+      6. <separator> → <div class="divider">：SeparatorWidget::OnDraw
+         （上游 controls.cpp:635-643）不调用 Widget::OnDraw，CSS background
+         永远不会被画出来，线条颜色写死 theme::kDivider()（light #D1D1D1 /
+         dark #424242）。要让分隔线走项目 token --app-divider 必须用 div。
+         上游 demo 同款做法：<div class="sep"/> + height:1 + background。
+
+    三、已知遗留（须真机确认，见 docs/13-UIX-FIRST-RENDER-CHECKLIST.md）
+      · core-ui 不支持 border-bottom：.tab-active 的 2px accent 指示条
+        只能由 Rust 自绘，或在 .uix 里用 2px 高的 <div> 实现。
+      · font-family 对普通 LabelWidget 不生效（仅 SVG 文本读取该属性），
+        实际字体由 Rust 调 ui_theme_set_default_font / ui_theme_set_cjk_font
+        决定；.root 上的声明仅作设计记录。
+      · 无运行时替换 CSS 变量的 C API（include/ui_core.h 无相关符号），
+        --app-* 只能由 Rust 在加载前把 :root 块拼进 <style> 块内部注入，
+        详见 docs/12 §4.2。
+      · .tab-active / .cmd-button / .cmd-group 三条 class 规则当前**没有任何
+        元素引用**，且 core-ui 没有运行时设置 class 的 C API → 它们是给 Rust
+        自绘标签条 / 命令栏时的**绘制规范参照**，不是生效的 CSS。详见 docs/12 §5 R10。
+
+    四、主题 token
+      全部改用 --app-* 前缀，避开 core-ui 自有的 34 个库 token（同名的
+      --bg / --accent / --sidebar-bg 会在 ui_theme_set_mode 时被库清空）。
+      详见 docs/12-UIX-TAG-FIX.md 与 assets/themes.json。
+-->
+<window title="tabbed_files" width="1200" height="800" />
+<script>
+  export default {
+    data() {
+      return { themeToken: "fluent2" };
+    }
+  };
+</script>
+<style>
+  /* 根容器：原 window { ... } 规则（<window> 是 SFC 外壳，选择器不匹配控件）。
+     font-family 只是设计记录 —— core-ui 只在 SVG 文本路径读该属性，普通
+     LabelWidget 一律走 ui_theme_set_default_font 设的字体（见 docs/12 §1）。 */
+  .root { background: var(--app-bg); color: var(--app-text); font-family: "Segoe UI Variable", "Segoe UI"; }
+
+  /* 标题栏 32px */
+  .titlebar { height: 32px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
+  .app-title { padding-left: 12px; font-size: 13px; color: var(--app-text-secondary); white-space: nowrap; }
+  .global-search { width: 280px; height: 26px; background: var(--app-content-bg); }
+
+  /* 标签栏 36px */
+  .tabbar { height: 36px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
+  .tab-placeholder { color: var(--app-text); white-space: nowrap; }
+
+  /* ↓↓↓ 以下三条是「Rust 自绘参照规范」，当前没有任何元素引用它们 ↓↓↓
+     标签条 / 命令栏由 Rust 侧自绘（docs/07 §3），core-ui 没有运行时设置
+     class 的 C API，所以这三类不会由 .uix 渲染 —— 它们记录的是绘制尺寸与
+     颜色口径，供 src/ui/tabbar.rs / toolbar.rs 实现时对齐。
+     · border-bottom 在 core-ui 不被支持（仅 border / border-width /
+       border-color），2px accent 指示条须由 Rust 自绘或用 2px 高的 <div>。
+     · var(--accent) 是【库 token】（随 ui_theme_set_mode 切换），与其余
+       --app-*（不随主题切换）不是一个命名空间，这里是刻意的：指示条应跟随
+       系统主题。 */
+  .tab-active { color: var(--app-text); border-bottom: 2px solid var(--accent); }
+
+  /* 命令栏 40px */
+  .commandbar { height: 40px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
+  .cmd-button { width: 32px; height: 32px; }   /* Rust 自绘参照，见上 */
+  .cmd-group { width: 8px; }                   /* Rust 自绘参照，见上 */
+  .nav-hint { color: var(--app-text-secondary); white-space: nowrap; }
+
+  /* 地址与搜索条 36px */
+  .addressbar { height: 36px; background: var(--app-content-bg); flex-direction: row; align-items: center; }
+  .breadcrumb { flex: 1; height: 26px; color: var(--app-text); }
+  .address { flex: 1; height: 26px; background: var(--app-content-bg); }
+  .search { width: 220px; height: 26px; background: var(--app-content-bg); }
+
+  /* 工作区：导航 | 列表 | 预览 三栏 */
+  .main-area { flex: 1; flex-direction: row; }
+  .nav-host { width: 220px; background: var(--app-sidebar-bg); }
+  .list-host { flex: 1; background: var(--app-content-bg); }
+  .preview-host { width: 320px; background: var(--app-sidebar-bg); }
+  /* 竖向分隔线：core-ui 的 <Separator> 只有水平形态，竖线用 1px 宽的 div */
+  .vsep { width: 1px; background: var(--app-divider); align-self: stretch; flex-shrink: 0; }
+
+  /* 信息条 36px（默认收起） */
+  .infobar { height: 0px; background: var(--app-info-bg); flex-direction: row; }
+  .infobar-visible { height: 36px; background: var(--app-info-bg); color: var(--app-text); }
+
+  /* 状态栏 28px */
+  .statusbar { height: 28px; background: var(--app-toolbar-bg); flex-direction: row; align-items: center; }
+  .status-segment { padding-left: 12px; color: var(--app-text-secondary); white-space: nowrap; }
+
+  /* 水平分隔线 1px：必须用 <div> 而不是 <separator> ——
+     SeparatorWidget::OnDraw（controls.cpp:635-643）不调用 Widget::OnDraw，
+     CSS background 永远不会被画出来，线条颜色写死 theme::kDivider()。
+     上游 demo 同款做法：<div class="sep"/> + height:1 + background。 */
+  .divider { height: 1px; background: var(--app-divider); flex-shrink: 0; }
+</style>
+<template>
+  <div class="root">
+    <div id="titlebar_host" class="titlebar">
+      <span class="app-title">tabbed_files</span>
+      <input id="global_search" class="global-search" />
+    </div>
+    <div id="tab_host" class="tabbar">
+      <label id="tab_placeholder" class="tab-placeholder">标签页由 Rust 侧 TabManager 提供</label>
+    </div>
+    <div class="divider" />
+    <div id="command_host" class="commandbar">
+      <label id="nav_hint" class="nav-hint">后退 前进 上级 刷新 · 查看 排序 预览</label>
+    </div>
+    <div class="divider" />
+    <div id="address_host" class="addressbar">
+      <div id="breadcrumb" class="breadcrumb" />
+      <input id="address" class="address" />
+      <input id="search" class="search" />
+    </div>
+    <div class="divider" />
+    <div id="infobar_host" class="infobar" />
+    <div class="main-area">
+      <div id="nav_host" class="nav-host" />
+      <div class="vsep" />
+      <div id="list_host" class="list-host" />
+      <div class="vsep" />
+      <div id="preview_host" class="preview-host" />
+    </div>
+    <div class="divider" />
+    <div id="status_host" class="statusbar">
+      <span id="status_item_count" class="status-segment" />
+      <span id="status_selected" class="status-segment" />
+      <span id="status_text" class="status-segment" />
+      <span id="status_progress" class="status-segment" />
+      <span id="status_thumb_cache" class="status-segment" />
+      <span id="status_image_channel" class="status-segment" />
+    </div>
+  </div>
+</template>

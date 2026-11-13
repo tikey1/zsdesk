@@ -216,10 +216,75 @@ core-ui 会**重新造**一个 CustomWidget → **Rust 只需重挂回调**（`u
 | 项 | 决定 |
 |---|---|
 | 加载 API | **`ui_page_load_string(const char* html_source)`**（UTF-8 源码）—— 不是 `ui_page_load_file` |
-| Rust 流程 | 读 `assets/main.uix`（UTF-8）→ 读 `assets/themes.json` → 拼 `:root { --app-*: … }` → 拼进源码 → `ui_page_load_string` |
+| Rust 流程 | 读 `assets/main.uix`（UTF-8）→ 读 `assets/themes.json` → 拼 `:root { --app-*: … }` → **按 §4.3.2.1 的规则注入** → `ui_page_load_string` |
 | 编码 | `ui_page_load_string` 收 `const char*` = **UTF-8**（与 `ui_page_load_file` 的 `const wchar_t*` **不同**，别写混） |
 | **打包后果** | ★ **`.uix` 与 `themes.json` 必须以文件形式进包** —— Rust 要在运行时读它们并拼源码。若只打进 exe 就无法注入 `:root` |
 | 主题切换 | `ui_page_reload` 会**重放旧源码**（改不了 palette）→ 切换明暗必须**重新 `ui_page_load_string` 一个新页面**，并重走 §4.3.1 的装配流程 |
+
+#### 4.3.2.1 ★ `:root` 注入的**四条硬规则**（QA B1 复核 + 架构侧核对）
+
+> **背景**：QA 独立核实发现 —— `:root` 块若拼在 `.uix` **源码顶层**（不在 `<style>` 内）→
+> `sfc_parser.cpp:260-267` 报 `unexpected content at top level` → `doc.ok = false` →
+> **三个窗口一个都出不来**，报错是 "SFC parse failed"，极易误判成标签问题。
+> **架构侧已独立核对源码，结论一致。**
+
+**规则 1 —— `:root` 必须包在 `<style>` 块内，禁止裸放在源码顶层**
+
+```cpp
+// src/ui/uix/sfc_parser.cpp:260-267
+if (c.peek() != '<') {
+    pushErr(doc, "unexpected content at top level (only <window>, <template>, "
+    "<script>, <style>, <import>, <link> allowed)", c.line, c.col);
+    doc.ok = false;
+    return doc;
+}
+```
+
+顶层**只允许**这六种标签：`<window>` `<template>` `<script>` `<style>` `<import>` `<link>`。
+
+**两种合法注入形态**（等价，任选其一）：
+
+| 形态 | 做法 | 说明 |
+|---|---|---|
+| **甲（推荐）** | 在源码**末尾追加一个完整的 `<style>` 块**：`<style>\n:root{…}\n</style>` | `<style>` 是**允许的顶层标签** ✓；**多个 `<style>` 块是允许的**（`sfc_parser.cpp:321-330`：`doc.styles.push_back(blk)`，**没有** duplicate 检查）；且天然保证注入的 `:root` 在 source order 上**最后** |
+| 乙 | 在**已有的** `<style>` 块内部、其 `</style>` 之前插入 `:root{…}` | 要求该 `.uix` **必须已有** `<style>` 块，否则无处可去；且只有当该块是**最后一个** `<style>` 时才满足「source order 最后」 |
+
+> **推荐甲**：不依赖对已有块的解析，且天然满足「注入值在 source order 最后」
+> （自定义属性同特异性下，**后者覆盖前者**）。
+
+**规则 2 —— `:root` 内只允许 CSS 变量声明**
+
+```cpp
+// src/ui/css/cascade.cpp:124-126
+// Skip :root — those only define CSS vars, handled separately
+if (IsRootSelector(sel)) continue;
+```
+
+`:root` 是**伪类**（`state::Root`），在**普通样式计算**里被**显式跳过** →
+`:root { background: …; color: …; font-family: … }` 里的这些属性**会被静默丢弃**。
+
+→ **`:root` 里只写 `--app-*` 变量**。
+根节点的 `background` / `color` / `font-family` 走**根 `<div class="root">` 的 class 规则**（§4.3.3 约束 3）。
+
+**规则 3 —— 注入必须早于 load，且失败要 fail-fast**
+
+- **顺序**：`:root` 注入 → `ui_page_load_string`。晚一步 → 自定义属性不存在 →
+  `var(--app-bg)` 解析失败 → **静默回落到库默认色**，界面白得像「能跑」但配色全错。
+- **fail-fast 自检（Rust 侧，load 之前）**：
+  1. 解析注入后的源码，找出所有 `<style …> … </style>` 块的**区间**；
+  2. 断言每个 `:root` 的出现位置**落在某个区间内**；
+  3. 不满足 → **在 Rust 侧直接失败**并给出「`:root` 必须在 `<style>` 块内」的具体提示
+     —— **不许**把这个错误留到 core-ui 侧报成 "SFC parse failed"。
+
+> **为什么这条必须由 Rust 自检**：core-ui 的错误信息是
+> "unexpected content at top level"，**不指出行号、不区分是 `:root` 越界还是别的顶层内容**
+> → 现场极难定位。自检把「我拼错了」变成「我在拼之前就知道错了」。
+
+**规则 4 —— 注入的 `:root` 必须在 source order 上最后**
+
+自定义属性之间同特异性 → **source order 决定谁赢**。
+若 `.uix` 里将来也出现 `:root { --app-bg: … }`，必须保证 **Rust 的值生效** → 注入位置要靠后（形态甲天然满足）。
+
 
 ### 4.3.3 ★ `.uix` 解析的三条硬约束（2026-11-13 源码级核对）
 
@@ -430,41 +495,56 @@ Rust。Rust 状态机改完后自己 diff（上游 zsdesk 已有这套 MVU 骨�
 
 ## 5. 版本与能力协商
 
-### 5.1 实测差异（`docs/05-COREUI-ABI-NOTES.md` V02~V05）
+### 5.1 实测差异（`docs/05-COREUI-ABI-NOTES.md` V02~V05 + PM 的源码扫描，2026-11-13 更新）
 
 | 项 | 数量 |
 |---|---|
 | DLL 总导出 | **2006** |
 | DLL 的 `ui_*` 纯 C API | **567** |
+| **pinned revision 源码里的 `UI_API` 声明**（PM 对 `1840d689` 全 `src/` 扫描） | **567** |
 | 头文件声明的 `ui_*` | 557 |
-| 双方都有（交集） | **555** |
-| **DLL 比头文件多** | **12**：`ui_flush_gpu`、`ui_image_evict_tile`、`ui_image_view_gdi`、`ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}` |
-| **头文件比 DLL 多** | **2**：`ui_core_embed_binary`、`ui_dialog` |
+| **源码集合 ∩ DLL 导出集合** | **双向差集为空**（除 `ui_dialog`） |
+| 头文件有、源码无、DLL 无 | **1**：`ui_dialog`（头文件有声明，源码自 build 158 已删） |
+| 头文件**漏声明**、但源码有 `UI_API`、DLL 有导出 | **12**：`ui_flush_gpu`、`ui_image_evict_tile`、`ui_image_view_gdi`、`ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}` |
 
-> **两处必须写清的修正**：
+> ### ★ 关键更正（2026-11-13）
 >
-> 1. **`ui_core_embed_binary` 不是 C API** —— 它是 CMake 辅助函数
->    （`cmake/embed_binary.cmake` 的 `ui_core_embed_binary(TARGET FILE … OUT … VAR …)`），
->    用来生成内嵌字节的 .h 文件。**它从来不会出现在任何 DLL 的导出表里**，
->    因此**不在绑定清单里**，也不属于「缺失即降级」的能力。
->    发布态的资源注册走 `ui_asset_register_blob`。
-> 2. **那 12 个「DLL 独有」符号在头文件里没有声明** → **签名未知** →
->    **不绑定、不调用**（ABI-NOTES 硬规则 3）。绑定层只对它们做**存在性探测**
->    （`GetProcAddress` 返回非空即存在），用于诊断报告。
->    它们的语义要等 **U08** 真机核对后才能用。
+> **「DLL 比头文件多 12 个」的真正原因是：上游 `include/ui_core.h` 漏同步声明**，
+> **不是**「本机 DLL 版本领先」（ABI-NOTES V04 原文已如此指出，PM 的源码扫描进一步证实：
+> pinned revision 的源码里**也有**这 12 个）。
+>
+> → **这 12 个符号在 CI 从仓库 main 编出的 DLL 里同样存在** → **可以正常绑定**，
+> 签名取自上游 `src/ui/ui_api.cpp`（逐个核对，非推测）。
+> → 之前「它们只在本机 DLL 上 → CI 产物没有 → 方案不成立」的判断**作废**，
+> 错因是**把头文件当成了完备契约**（ABI-NOTES 硬规则 1 说的正是这件事）。
+>
+> 另一个更正：**`ui_core_embed_binary` 不是 C API** —— 它是 CMake 辅助函数
+> （`cmake/embed_binary.cmake` 的 `ui_core_embed_binary(TARGET FILE … OUT … VAR …)`），
+> 用来生成内嵌字节的 .h 文件。**它从来不会出现在任何 DLL 的导出表里**，
+> 因此**不在绑定清单里**，也不属于「缺失即降级」的能力。
+> 发布态的资源注册走 `ui_asset_register_blob`。
 
-### 5.1.1 CI 构建产物 vs 本机 DLL 的导出面（关键推论）
+### 5.1.1 CI 构建产物 vs 本机 DLL 的导出面（关键推论，**已按源码扫描更新**）
 
-CI 从**仓库 main** 编译 core-ui（D03），而那 12 个符号在仓库的 `include/ui_core.h` 里没有声明
-（V04 原文：「上游头文件漏同步声明，不是本机版本领先」）。
-→ **CI 产物上的 `ui_*` 导出面预计 = 555（交集）+ `ui_core_embed_binary`（若真被导出）+ `ui_dialog`（若真被导出）**，
-**不含**那 12 个。
+CI 从**仓库 main** 编译 core-ui（D03）。按 PM 的源码扫描，pinned revision 的源码有
+**567** 个 `UI_API` 的 `ui_*`，与本机 DLL 的 567 个**双向差集为空**（除 `ui_dialog`）。
 
 因此：
-- 绑定层的**必需符号**必须落在 **555 的交集**里（两处都有）；
-- 门禁 **S7** 比对 CI 产物的导出面时，**允许的差异集合 = {`ui_core_embed_binary`, `ui_dialog`}**，
-  **出现第三类差异即失败**；
-- `image_gdi` 能力族在 CI 产物上**必然不可用** → 任何功能**不得**依赖它。
+
+| 断言 | 判定 |
+|---|---|
+| CI 产物的 `ui_*` 导出集 **应与** 本机 DLL 的 567 个一致（`ui_dialog` 除外） | ✅ 预期成立 → **S7' 的判据** |
+| 绑定层的**必需符号**必须落在 **567** 里（两处都有） | ✅ 安全 |
+| 那 12 个「头文件漏声明」的符号在 CI 产物上**存在** | ✅ 可正常绑定（见 §5.3 / §6） |
+| `ui_dialog` 在 CI 产物上**不存在**（源码自 build 158 已删） | ✅ 必须当**可选**（缺失 → `ui_msgbox` 兜底） |
+
+> **S7' 的落地形态**（两段，见 `spec/ci-contract.md` §3.3 第 20/21 条）：
+> - **第一段（⏳ 本版就加）**：CI 枚举构建出的 `core-ui.dll` 导出表 →
+>   断言 `ui_*` 集合 **==** `docs/05-COREUI-EXPORTS.txt` 的 567 个（允许 `ui_dialog` 缺失）。
+>   **不需要绑定层落地** → 现在就能加。
+> - **第二段（⏳ M1 加）**：绑定层的**必需符号集** ⊆ 实测导出集；
+>   必需 ∩ 可选 = ∅。需要绑定层先落地。
+
 
 ### 5.2 协商方式
 
@@ -478,10 +558,12 @@ CI 从**仓库 main** 编译 core-ui（D03），而那 12 个符号在仓库的 
 
 ### 5.3 能力表（`Capabilities`）
 
-| 能力 | 符号 | 缺失时的降级 |
-|---|---|---|
-| `dialog` | `ui_dialog`（头文件有声明，本机 DLL 无导出） | 用 `ui_msgbox` 模态对话框兜底 |
-| 「本机 DLL 独有」族 | 12 个 `ui_image_gdi_*` / `ui_image_view_gdi` / `ui_image_evict_tile` / `ui_flush_gpu` | **只探测、不调用**（签名未知）；任何功能不得依赖它们 |
+| 能力 | 符号 | 状态 | 缺失时的降级 |
+|---|---|---|---|
+| `dialog` | `ui_dialog` | **可选**（头文件有声明，源码自 build 158 已删 → 本机 DLL 与 CI 产物都没有） | 用 `ui_msgbox` 模态对话框兜底 |
+| `image_gdi` | `ui_image_view_gdi` + 8 个 `ui_image_gdi_*` | **可绑定**（签名取自 `src/ui/ui_api.cpp`；仓库 main 源码里也有 → CI 产物必然有） | 用 `ui_image_view` + `ui_image_set_pixels` 路径 |
+| `image_evict_tile` | `ui_image_evict_tile` | 可绑定（同上） | 大图瓦块不主动淘汰（靠 `ui_image_clear`） |
+| `flush_gpu` | `ui_flush_gpu` | 可绑定（同上） | 退出前不强制刷 GPU |
 
 > 「本机 DLL 独有」族**不作为能力开关**存在 —— 它们在 CI 产物上根本不存在，
 > 把它做成 `Option` 能力只会诱导后来者写出「在开发机上能跑、CI 产物上崩」的代码。
@@ -491,18 +573,36 @@ CI 从**仓库 main** 编译 core-ui（D03），而那 12 个符号在仓库的 
 绑定层要求 **build ≥ 345**（= pinned revision `1840d689…` 的版本）。
 低于此值 → `LoadError::TooOld`，**不做降级**。
 
-### 5.5 revision 戳记（证明「手边这份 DLL 就是 CI 构建的那份」）
+### 5.5 revision 戳记 —— **Rust 产出，CI 只校验**（口径「甲」）
 
-CI 打包时在 `core-ui.dll` 旁写一个 `core-ui.dll.revision`（纯文本一行 SHA）。
-运行时读取并与编译期固化的 `EXPECTED_REVISION` 比对：
+**契约（逐字，运维按此改 `build.yml`）**：
 
-| 结果 | 处置 |
+| 项 | 约定 |
 |---|---|
-| 一致 | 正常 |
-| 不一致 | **打警告**（不阻断启动 —— 兜底加载本机 GuoheView 的 DLL 是允许的降级），写进诊断报告 |
-| 缺失 | 同上，警告 |
+| **谁写** | **Rust 侧**：`crates/zsdesk-coreui/build.rs` 在**编译期**写出。CI **不自己写**戳记 |
+| **何时** | 每次 `cargo build` / `cargo test` 运行 build.rs 时（因此与 exe 天然同版本） |
+| **写什么** | `packaging/core-ui-revision.txt` 的内容去首尾空白后，原样写入 + **一个换行**；**无 BOM** |
+| **写到哪** | **与最终 exe 同目录** → `target/<profile>/core-ui.dll.revision`（`OUT_DIR` 往回 3 层） |
+| **CI 做什么** | **只校验**：打包后断言「包内 `core-ui.dll.revision` 的内容（trim）== `packaging/core-ui-revision.txt` 的内容（trim）」；不等即**打包失败** |
 
-CI 侧另有一道**硬门禁**：DLL 缺失 / 戳记不匹配 → 打包步骤失败（见 `spec/ci-contract.md` §5 S7）。
+**为什么是 Rust 产出**：编译期常量 `EXPECTED_REVISION` 是**唯一权威来源**。
+若由 CI 写戳记，就会出现两个来源（编译期常量 vs CI 读的文件）→ 比对失去意义。
+
+**运行时语义（诚实版）**：
+
+| 检查 | 处置 |
+|---|---|
+| 戳记存在？ | 缺失 → 警告「这个包不是 CI 构建的」 |
+| 戳记内容 == 编译期 `EXPECTED_REVISION`？ | 不一致 → **警告**（不阻断启动 —— 兜底加载本机 GuoheView 的 DLL 是允许的降级），写进诊断报告 |
+
+> ⚠️ **戳记能证明什么、不能证明什么**：
+> - ✅ 能证明「**这个包是针对哪个 core-ui revision 构建的**」；
+> - ❌ **不能**证明「当前加载的 DLL 就是那个 revision 的产物」——
+>   那需要 DLL 自带版本信息，由 **CI 的 Gate G2**（DLL 版本资源 ↔ pinned revision 的 `VERSION`）保证。
+> 两者是**互补**的，不是重复。
+
+**实现已落在** `spec/rust-ffi-skeleton/build.rs`（`write_revision_stamp()`）。
+
 
 ### 5.6 深浅色与 CSS token（D10）—— 两个查证结论
 
@@ -701,8 +801,8 @@ ui_theme_set_text_locale / ui_theme_set_text_render_mode
 | 调试/离屏 | `ui_debug_{free,dump_tree,screenshot,screenshot_menu,server_start}` / `ui_offscreen_{begin,end}` | ✅ 必需（CI 验证用） |
 | 图片 | `ui_image_{view,set_pixels,load_file,clear,fit,reset,set_zoom,get_zoom,width,height,get_pixels,free_pixels}` | ✅ 必需（M2 预览） |
 | 窗口配置 | `ui_window_create` / `ui_page_open_window` 的 `UiWindowConfig*` | ⚠️ 声明但**不用**（见 §2.3） |
-| 可选 | `ui_dialog`（头文件有声明、本机 DLL 无导出） | 🔶 可选（`Option`） |
-| 仅探测不调用 | 12 个「本机 DLL 独有」符号（`ui_image_gdi_*` / `ui_image_view_gdi` / `ui_image_evict_tile` / `ui_flush_gpu`） | 🔶 只做存在性探测（签名未知） |
+| 可选 | `ui_dialog`（头文件有声明、**源码自 build 158 已删** → 本机 DLL 与 CI 产物都没有） | 🔶 可选（`Option`），缺失 → `ui_msgbox` 兜底 |
+| 可选（已可绑定） | 12 个「**头文件漏声明、但源码有 `UI_API`**」的符号：`ui_flush_gpu`、`ui_image_evict_tile`、`ui_image_view_gdi`、`ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}` | 🔶 可选（`Option`），签名取自上游 `src/ui/ui_api.cpp` |
 | 不在清单 | `ui_core_embed_binary` | ⛔ **不是 C API**（CMake 辅助函数） |
 | 暂不绑 | `ui_gh_img_view_*`（12 个）、`ui_ocr_img_view_*`、`ui_menu_set_*`（视觉微调）、`ui_page_load_language_*`、`ui_widget_set_draggable`（HTML5 内部拖放，不是 OLE） | ⛔ 首版不绑 |
 

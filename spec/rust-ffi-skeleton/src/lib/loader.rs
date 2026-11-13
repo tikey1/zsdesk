@@ -296,19 +296,34 @@ define_optional_api! {
     // 用来生成内嵌字节的 .h 文件。从来不会出现在任何 DLL 的导出表里，
     // 因此**不在绑定清单里**。发布态的资源注册走 `ui_asset_register_blob`。
     dialog: unsafe extern "C" fn() -> UiWidget = "ui_dialog",
+
+    // ↓↓↓ 「头文件漏声明、但源码有 UI_API」的 12 个 —— 签名取自 src/ui/ui_api.cpp ↓↓↓
+    flush_gpu: unsafe extern "C" fn(UiWindow) = "ui_flush_gpu",
+    image_evict_tile: unsafe extern "C" fn(UiWidget, i32, i32) = "ui_image_evict_tile",
+    image_view_gdi: unsafe extern "C" fn() -> UiWidget = "ui_image_view_gdi",
+    image_gdi_set_parent: unsafe extern "C" fn(UiWidget, UiWindow) = "ui_image_gdi_set_parent",
+    image_gdi_set_pixels: unsafe extern "C" fn(UiWidget, *const core::ffi::c_void, i32, i32, i32) = "ui_image_gdi_set_pixels",
+    image_gdi_set_file: unsafe extern "C" fn(UiWidget, *const u16) = "ui_image_gdi_set_file",
+    image_gdi_clear: unsafe extern "C" fn(UiWidget) = "ui_image_gdi_clear",
+    image_gdi_get_zoom: unsafe extern "C" fn(UiWidget) -> f32 = "ui_image_gdi_get_zoom",
+    image_gdi_set_zoom: unsafe extern "C" fn(UiWidget, f32) = "ui_image_gdi_set_zoom",
+    image_gdi_fit: unsafe extern "C" fn(UiWidget) = "ui_image_gdi_fit",
+    image_gdi_width: unsafe extern "C" fn(UiWidget) -> i32 = "ui_image_gdi_width",
+    image_gdi_height: unsafe extern "C" fn(UiWidget) -> i32 = "ui_image_gdi_height",
 }
 
-/// 「本机 DLL 独有」的 12 个符号（实测：`docs/05-COREUI-EXPORTS.txt`）。
+/// 「头文件漏声明、但源码有 `UI_API` 定义」的 12 个符号。
 ///
-/// **这些符号在 `include/ui_core.h` 里没有声明**，签名未知 →
-/// **不得编造签名、不得绑定、不得调用**（ABI-NOTES 硬规则 3）。
+/// ★ 2026-11-13 更正：它们**不是**「本机 DLL 独有」。
+/// PM 对 pinned revision 1840d689 全 `src/` 扫 `UI_API` → 567 个 `ui_*`，
+/// 与本机 DLL 的 567 个**双向差集为空** → 仓库 main 的源码里也有
+/// → **CI 从仓库 main 编出的 DLL 必然导出它们**。
 ///
-/// 这里只做**存在性探测**（`GetProcAddress` 返回非空即存在），
-/// 用于诊断报告里告诉用户「你本机这份 core-ui.dll 带 GDI 位图能力」。
-/// 探测用占位签名 `unsafe extern "C" fn()`；libloading 的
-/// `ensure_compatible_types` 只比较 size/align，不校验具体签名，
-/// 而我们**永远不会调用**这个指针。
-pub const LOCAL_ONLY_SYMBOLS: &[&str] = &[
+/// 之前的判断（「只在 `ui_image_gdi_*` 一族里 → CI 产物没有 → 方案不成立」）
+/// 错在**把头文件当完备契约** —— 上游 `include/ui_core.h` 漏同步声明了它们。
+///
+/// 签名取自上游 `src/ui/ui_api.cpp`（逐个核对，非推测）→ **可以正常绑定**。
+pub const HEADER_UNDECLARED_SYMBOLS: &[&str] = &[
     "ui_flush_gpu",
     "ui_image_evict_tile",
     "ui_image_view_gdi",
@@ -322,17 +337,6 @@ pub const LOCAL_ONLY_SYMBOLS: &[&str] = &[
     "ui_image_gdi_fit",
     "ui_image_gdi_clear",
 ];
-
-/// 仅探测符号存在性，**绝不调用**。
-///
-/// # Safety
-/// `lib` 必须是已成功加载的 DLL。
-unsafe fn probe_symbol(lib: &libloading::Library, name: &str) -> bool {
-    // 占位签名：只用来拿到地址。libloading 的 `ensure_compatible_types`
-    // 只比较 size 与 align（函数指针均为 8 字节 / align 8），不会校验签名。
-    let sym = unsafe { lib.get::<unsafe extern "C" fn() -> ()>(name.as_bytes()) };
-    sym.is_ok()
-}
 
 /// 已加载的 core-ui 运行时。
 ///
@@ -365,20 +369,12 @@ impl CoreUi {
         let api = unsafe { Api::bind(&lib) }.map_err(LoadError::Missing)?;
         // SAFETY: 同上；缺失降级为 None。
         let optional = unsafe { OptionalApi::bind(&lib) };
-        // SAFETY: 只做存在性探测，绝不调用。
-        let local_only = unsafe {
-            LOCAL_ONLY_SYMBOLS
-                .iter()
-                .map(|name| (*name, probe_symbol(&lib, name)))
-                .collect::<Vec<_>>()
-        };
-
         let version = CoreUiVersion::probe(&api);
         let min_build = crate::version::min_build();
         if !version.meets_minimum(min_build) {
             return Err(LoadError::TooOld { found: version, min_build });
         }
-        let capabilities = Capabilities::detect(&optional, &local_only);
+        let capabilities = Capabilities::detect(&optional);
 
         Ok(CoreUi {
             lib,

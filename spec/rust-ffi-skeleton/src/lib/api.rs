@@ -451,6 +451,48 @@ extern "C" {
 }
 
 // ---------------------------------------------------------------------------
+// 「头文件漏声明、但源码有 UI_API 定义」的 12 个符号
+//
+// ★ 2026-11-13 更正：这些符号**不是**「本机 DLL 独有」。
+// PM 对 pinned revision 1840d689 的全 `src/` 做 `UI_API` 扫描 → 567 个 `ui_*`，
+// 与本机 DLL 的 567 个**双向差集为空** → 它们在**仓库 main 的源码里都有**，
+// 因此 **CI 从仓库 main 编出的 DLL 必然导出它们**。
+// 之前「头文件有 557 / DLL 有 567」的差值，来源是**上游头文件漏同步声明**
+// （`src/ui/ui_api.cpp` 有 `UI_API` 定义，`include/ui_core.h` 没有），
+// 不是「本机版本领先」。
+//
+// 签名来源：上游 `src/ui/ui_api.cpp`（逐个核对，非推测）。
+// ---------------------------------------------------------------------------
+
+extern "C" {
+    /// 强制刷新并回收 GPU 资源。退出前调用可减少显存占用。
+    pub fn ui_flush_gpu(win: UiWindow);
+    /// 淘汰 ImageView 的指定瓦块（大图内存管理）。
+    pub fn ui_image_evict_tile(w: UiWidget, tile_x: i32, tile_y: i32);
+    /// GDI 版图片视图控件（与 `ui_image_view` 的 D2D 版并列的另一条路径）。
+    pub fn ui_image_view_gdi() -> UiWidget;
+    /// 把 GDI 图片视图挂到指定窗口下（**注意**：这是 core-ui 自己的 GDI 子窗口，
+    /// 不是把原生控件塞进 core-ui 窗口 —— 与 D04 的结论不冲突）。
+    pub fn ui_image_gdi_set_parent(w: UiWidget, win: UiWindow);
+    /// 【拷贝】像素为 BGRA 预乘；库复制一份。
+    pub fn ui_image_gdi_set_pixels(
+        w: UiWidget,
+        pixels: *const c_void,
+        width: i32,
+        height: i32,
+        stride: i32,
+    );
+    /// 路径是 UTF-16LE。
+    pub fn ui_image_gdi_set_file(w: UiWidget, path: *const u16);
+    pub fn ui_image_gdi_clear(w: UiWidget);
+    pub fn ui_image_gdi_get_zoom(w: UiWidget) -> f32;
+    pub fn ui_image_gdi_set_zoom(w: UiWidget, zoom: f32);
+    pub fn ui_image_gdi_fit(w: UiWidget);
+    pub fn ui_image_gdi_width(w: UiWidget) -> i32;
+    pub fn ui_image_gdi_height(w: UiWidget) -> i32;
+}
+
+// ---------------------------------------------------------------------------
 // 可选符号（`Option` 语义，缺失即降级）
 //
 // 声明放在 `loader.rs` 的 `define_optional_api!` 宏里（那里直接生成
@@ -459,8 +501,8 @@ extern "C" {
 // | 符号 | 头文件 | 本机 DLL | 处置 |
 // |---|---|---|---|
 // | `ui_dialog` | 有声明 `UI_API UiWidget ui_dialog(void);` | **无导出** | 可选；缺失时用 `ui_msgbox` 兜底 |
-// | `ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}` | **无声明** | 有导出 | **不绑定、不调用**（签名未知，U08 待核对） |
-// | `ui_image_view_gdi` / `ui_image_evict_tile` / `ui_flush_gpu` | **无声明** | 有导出 | **不绑定、不调用**（签名未知） |
+// | `ui_image_gdi_{set_file,set_pixels,set_parent,set_zoom,get_zoom,width,height,fit,clear}` | **无声明** | 有导出 | ✅ **可绑定**（签名取自 `src/ui/ui_api.cpp`；仓库 main 源码里也有 → CI 产物必然有） |
+// | `ui_image_view_gdi` / `ui_image_evict_tile` / `ui_flush_gpu` | **无声明** | 有导出 | ✅ **可绑定**（同上） |
 //
 // `ui_core_embed_binary` **不是 C API** —— 它是 CMake 辅助函数
 // （`cmake/embed_binary.cmake`），用于生成内嵌字节的 .h 文件。

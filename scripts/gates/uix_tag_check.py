@@ -57,11 +57,12 @@ FORBIDDEN_ATTRS = (
 
 ASSETS = ("assets/main.uix", "assets/preview.uix", "assets/about.uix")
 
-# 修正前后必须一致的元素总数（docs/12 §0）
+# 修正前后必须一致的**模板体**元素数（docs/12 §0；不含 <window>/<style>/<template>
+# 三个 SFC 外壳 —— 那是文件外壳，不是界面元素）
 EXPECTED_ELEMENT_COUNT = {
-    "assets/main.uix": 33,
-    "assets/preview.uix": 12,
-    "assets/about.uix": 19,
+    "assets/main.uix": 30,
+    "assets/preview.uix": 9,
+    "assets/about.uix": 16,
 }
 # 必须存在的 id（Rust 侧靠 ui_widget_find_by_id 取句柄）
 EXPECTED_IDS = {
@@ -88,6 +89,12 @@ def strip_noise(src: str) -> str:
     return src
 
 
+def template_body(src: str) -> str:
+    """取 <template>…</template> 内部 —— 界面元素只在这里面。"""
+    m = re.search(r"<template>(.*?)</template>", src, flags=re.S)
+    return m.group(1) if m else ""
+
+
 def check_file(path: Path, root: Path) -> list[str]:
     rel = path.relative_to(root).as_posix()
     fails: list[str] = []
@@ -96,6 +103,9 @@ def check_file(path: Path, root: Path) -> list[str]:
 
     counts = collections.Counter(
         re.findall(r"<\s*(?!/)([A-Za-z][A-Za-z0-9_-]*)", body)
+    )
+    tpl_counts = collections.Counter(
+        re.findall(r"<\s*(?!/)([A-Za-z][A-Za-z0-9_-]*)", template_body(body))
     )
     print(f"\n=== {rel} ===")
     for tag, n in sorted(counts.items()):
@@ -113,11 +123,11 @@ def check_file(path: Path, root: Path) -> list[str]:
         if counts.get(tag):
             fails.append(f"{rel}: 遗留旧标签 <{tag}> ×{counts[tag]}")
 
-    # 2. 元素总数不变
-    total = sum(counts.values())
+    # 2. 模板体元素数不变
+    total = sum(tpl_counts.values())
     want = EXPECTED_ELEMENT_COUNT.get(rel)
     if want is not None and total != want:
-        fails.append(f"{rel}: 元素总数 {total} ≠ 期望 {want}")
+        fails.append(f"{rel}: 模板体元素数 {total} ≠ 期望 {want}")
 
     # 3. id 全在
     ids = set(re.findall(r'\bid\s*=\s*"([^"]+)"', body))
@@ -154,7 +164,7 @@ def check_file(path: Path, root: Path) -> list[str]:
             fails.append(f"{rel}:{lineno}: 硬编码色值 → {line.strip()}")
 
     if not fails:
-        print(f"  ✔ 元素 {total} 个 / id {len(ids)} 个 —— 全部检查通过")
+        print(f"  ✔ 模板体元素 {total} 个 / id {len(ids)} 个 —— 全部检查通过")
     return fails
 
 
@@ -180,7 +190,7 @@ def main() -> int:
             print("  -", f)
         return 1
     print("PASS —— 三个 .uix 资产：标签全部在 core-ui 支持表内，"
-          "零遗留旧标签，D-15 合规，id / 元素总数保全。")
+          "零遗留旧标签，D-15 合规，id 集合与模板体元素数保全。")
     return 0
 
 

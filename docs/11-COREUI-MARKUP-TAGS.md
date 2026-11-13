@@ -31,7 +31,7 @@
 | 标签 | 落地控件 |
 |---|---|
 | `button` | `ButtonWidget`（`type="primary"` 走 Fluent 2 accent） |
-| `input` | 单行输入（`type="checkbox"` 走 CheckBox） |
+| `input` | 单行输入。`type` 子类型（`widget_factory.cpp:1207-1283`）：`checkbox`→CheckBox、`radio`→RadioButton、`range`→Slider、`number`→NumberBox、`password`→带掩码的 TextInput、缺省→TextInput |
 | `textarea` | 多行输入 |
 | `select` | 下拉 |
 | `chips-input` / `ChipsInput` | 多值输入 |
@@ -86,7 +86,10 @@
 5. `<panel ... />` → `<div ... />`
 6. `<vseparator ... />` → `<div class="vsep" />`，样式给 `width: 1px; background: var(--divider); align-self: stretch;`
 7. **所有 `id` 必须保留** —— Rust 侧靠 `ui_widget_find_by_id` 取句柄。
-8. **所有 `class` 与 `<style>` 规则必须保留** —— 现有 `themes.json` 的 token 变量（`--bg` / `--content-bg` / `--accent` / `--selection-bg` / `--hover` / `--pressed` / 语义色等）就是通过这些 class 生效的。
+8. **所有 `class` 与 `<style>` 规则必须保留** —— `themes.json` 的 token 变量就是通过这些 class 生效的。
+   ⚠️ **token 名已全部改为 `--app-*` 前缀**（避免与 core-ui 自带的 34 个库 token 撞名，见 §5 与 `docs/12` §4）—— 规则 6 与规则 9 里的 `--divider` 应读作 `--app-divider`。
+9. `<separator ... />` → `<div class="divider" />`，样式给 `height: 1px; background: var(--divider); flex-shrink: 0;`
+   - 理由：`<separator>` 虽然**是**受支持标签，但它的 `OnDraw` 不调用 `Widget::OnDraw`（`controls.cpp:635-643`），**CSS `background` 不会被画出来**，颜色写死 `theme::kDivider()`。上游 demo 的水平分隔线同样用 `<div class="sep"/>` + `height:1` + `background`（`demo/ui_demo.uix:426` 等 10 处）。
 
 ### 2.2 保留 D-15 约束
 用户 `assets/main.uix` 头注释已声明：**STATIC LAYOUT ONLY** —— 只声明布局 / 样式 / token，**无事件属性、无业务脚本**；列表行由 Rust 侧 `ui_custom_on_draw` 绘制；回调在 Rust 注册；首版只读。
@@ -110,7 +113,7 @@
 | 滚动 | `ScrollView` **非虚拟化**；文件列表必须用 `<custom>` 自绘 + Rust 侧做虚拟化 |
 | 窗口几何单位 | **DIP**（1/96 英寸），物理像素 = DIP × monitor_dpi ÷ 96 |
 | 样式 | CSS 子集；未知属性被忽略；`display:inline/block/inline-block` 语义与浏览器一致 |
-| 调试 | `ui_debug_*` 族 71 个（控件树导出、高亮、截图、事件模拟），可在没有真机窗口时定位问题 |
+| 调试 | `ui_debug_*` 族 **71 个导出声明**（`grep -c "UI_API.*ui_debug_" include/ui_core.h` = 71；头文件全文出现该前缀 73 处，含 2 处注释提及）—— 控件树导出、高亮、截图、事件模拟，可在没有真机窗口时定位问题 |
 
 ---
 
@@ -118,12 +121,12 @@
 
 | # | 项 | 验证方法 |
 |---|---|---|
-| M01 | **未知标签的具体行为**（报错中止 / 静默忽略 / 产生空控件）—— 决定「标签写错」是白屏还是崩溃 | 造一个含未知标签的 `.uix`，`ui_page_load_string` 加载，看返回值与错误输出 |
+| M01 | **未知标签的具体行为**（报错中止 / 静默忽略 / 产生空控件）—— 决定「标签写错」是白屏还是崩溃 | ✅ **源码级已结案（QA 复核）**：`widget_factory.cpp:1192-1193` → 未识别的标签落到兜底分支 `return std::make_shared<VBoxWidget>()` → **静默变成一个空 VBox 盒子，不报错、不崩溃**。⇒「标签写错」的表现是**该有文字的位置空白**，既不是白屏也不是崩溃。渲染期表现仍需真机复现（步骤见 `docs/13` M01） |
 | M02 | `flex-direction: row` 在嵌套容器中的继承与覆盖 | 加载修正后的 `main.uix`，截图核对横排是否正确 |
 | M03 | `<label>` 与 `<span>` 在 flex 容器内的 stretch 行为差异 | 同上，截图核对状态栏片段是否被拉伸 |
 | M04 | `var(--token)` 自定义 CSS 变量是否被 core-ui 的 CSS 子集支持 | 加载后核对背景/文字色是否生效（`themes.json` 有 light/dark 两套） |
 | M05 | `<style>` 里 class 选择器与 `id` 选择器的支持度 | 同上 |
-| M06 | `<Separator>` 是否支持竖向（`orientation` 属性） | 查头文件 / 真机验证；否则按 §2.1 规则 6 用 `<div>` 代替 |
+| M06 | `<Separator>` 是否支持竖向（`orientation` 属性） | ✅ **源码级已结案（QA 复核 + 前端二次复核）**：`SeparatorWidget` 构造签名是 `explicit SeparatorWidget(bool vertical = false)`（`src/ui/controls.h:198-206`），但 `ConstructByTag`（`widget_factory.cpp:1059-1061`）**从不传 true**，全仓也没有 `vertical` / `orientation` 属性解析 ⇒ **标记里的 `<separator>` 永远只能水平**。竖线一律按 §2.1 规则 6 用 `<div>`。<br>⚠️ **另有一条 QA 查出的坑**：`<separator>` 的 `OnDraw`（`controls.cpp:635-643`）**不调用** `Widget::OnDraw` ⇒ **CSS `background` 永远不会被画出来**，线条颜色写死 `theme::kDivider()`（light `#D1D1D1` / dark `#424242`）。要让分隔线走项目 token，必须用 `<div>` |
 
 ---
 
@@ -176,4 +179,4 @@
 
 - 现有 `assets/*.uix` 的**设计意图与 token 体系可直接沿用**，只有 **6 个标签名需要机械替换**（`<text>` `<hbox>` `<vbox>` `<vseparator>` `<text-input>` `<panel>`），不需要重做设计。
 - `<custom>` 受支持 → 既定的「Rust 侧绘制列表」架构成立。
-- 修正后仍需真机确认 M01~M06；其中 **M04（CSS 变量）已由源码级核实为「支持」**（`cascade.cpp:42-54` 匹配 `var(`，`value.h:91` 提供 `Resolve a var(--name) reference`），**剩余风险从「变量不支持」转为「同名 token 被库接管」**（见 §5）。
+- 修正后仍需真机确认 M01~M06；其中 **M04（CSS 变量）已由源码级核实为「支持」**（`cascade.cpp:42-54` 匹配 `var(`，`value.h:91-93` 提供 `Resolve a var(--name) reference` / `LookupVar` 声明），**剩余风险从「变量不支持」转为「同名 token 被库接管」**（见 §5）。

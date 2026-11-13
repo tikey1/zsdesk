@@ -239,6 +239,9 @@ ui_core_version*  →  ui_init_with_theme  →  ui_page_load_string  →  ui_pag
 | V3.7 | 便携包 `ZSDesk-<version>-full-x64.zip` 生成，manifest 逐文件 `bytes + SHA-256` 可校验 | CI |
 | V3.8 | 强制校验 VC++ x64 Redistributable 通过 | `scripts/package-portable.ps1` |
 | V3-9 | 真机冒烟：全新 Windows 10/11 x64 机器上解压即用（只需已装 GuoheView） | 人工（≥2 台机器） |
+| **V3-10** | ★ **搜索后端不可用时必须自动回退**：Everything 未安装/未运行时 → 自动回退 **MFT/USN 索引 → 目录扫描**，且**功能仍可用**（搜得到结果），**不是**静默搜不出东西 | 人工（干净 VM，无 Everything）+ `zsdesk-app/src/fast_search/everything_runtime.rs` 的运行时探测 |
+| **V3-11** | ★ **UI 必须显示当前搜索后端**（Everything / MFT-USN / 目录扫描）—— 用户要能知道「为什么慢 / 为什么结果不一样」 | 截图 |
+| V3-12 | CI 侧：在**没有 Everything** 的 runner 上，搜索仍能返回结果 | CI（M3 冒烟） |
 
 ### 4.3 可演示的动作
 

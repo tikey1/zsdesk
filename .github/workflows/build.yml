@@ -225,12 +225,32 @@ jobs:
             Write-Host "::error title=core-ui build failed::$flat"
             $failed = $true
           }
-          # 把日志尾部也做成 annotation，便于直接定位首个真实报错
+          # 把编译错误逐行做成**独立** annotation —— GitHub 对多行 message 的处理不可靠
+          # （实测：多行 message 只显示首行），每行一条才能完整读到 clang 的错误输出。
           if (Test-Path -LiteralPath $log) {
-            $tail = (Get-Content -LiteralPath $log -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
-            if ($tail) {
-              $flatTail = ($tail -replace "`r`n", '%0A' -replace '%', '%25')
-              Write-Host "::error title=core-ui build log (tail 40)::$flatTail"
+            $lines = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue)
+            $bytes = (Get-Item -LiteralPath $log).Length
+            Write-Host "::error title=core-ui log stats::lines=$($lines.Count) bytes=$bytes"
+            $hits = @()
+            for ($i = 0; $i -lt $lines.Count; $i++) {
+              if ($lines[$i] -match 'FAILED:|error C[0-9]+|error:|fatal error') { $hits += $i }
+            }
+            if ($hits.Count -gt 0) {
+              $from = [Math]::Max(0, $hits[0] - 2)
+              $to   = [Math]::Min($lines.Count - 1, $hits[-1] + 2)
+              foreach ($l in $lines[$from..$to]) {
+                if ($l.Trim()) {
+                  $enc = ($l -replace '%','%25' -replace "`r",'')
+                  Write-Host "::error title=core-ui::$enc"
+                }
+              }
+            } else {
+              foreach ($l in ($lines | Select-Object -Last 12)) {
+                if ($l.Trim()) {
+                  $enc = ($l -replace '%','%25' -replace "`r",'')
+                  Write-Host "::error title=core-ui::$enc"
+                }
+              }
             }
           }
           # 日志尾部同时写进 step summary，网页上直接可见，不必展开日志

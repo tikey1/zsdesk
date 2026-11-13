@@ -149,11 +149,15 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
 ### D08 core-ui FFI 绑定 → **手写 `extern "C"` + 运行时符号表**（不用 bindgen、不链接 `.lib`）
 
 - **做法**：
-  - 绑定清单以 **`docs/05-COREUI-EXPORTS.txt`（567 个 `ui_*`）为准**，头文件只提供签名
-    （它**漏声明** 12 个本机实际导出的符号）；
+  - 绑定清单以 **`docs/05-COREUI-EXPORTS.txt`（567 个 `ui_*`）为准**；
   - **必需符号**（约 150 个）缺失 → **加载即失败**，报出缺哪个符号；
   - **可选符号**（`ui_dialog`）缺失 → `Option` → 降级（用 `ui_msgbox` 兜底）；
-  - 12 个「DLL 独有」符号**签名未知 → 只做存在性探测，绝不绑定、绝不调用**；
+  - **★ 2026-11-13 放宽**：那 12 个「**头文件漏声明、但源码有 `UI_API`**」的符号
+    （`ui_flush_gpu`、`ui_image_evict_tile`、`ui_image_view_gdi`、`ui_image_gdi_*` 共 9 个）
+    **可以正常绑定** —— 签名已从上游 `src/ui/ui_api.cpp` 逐个核对取得。
+    （此前「只做存在性探测、绝不绑定」的判断**错在把头文件当完备契约**：
+    PM 对 pinned revision `1840d689` 全 `src/` 扫 `UI_API` → **567** 个 `ui_*`，
+    与本机 DLL 的 567 个**双向差集为空** → **CI 产物同样有**。）；
   - 编码**逐函数不同**（`const char*` 72 处 / `const wchar_t*` 77 处）→ 统一在绑定层
     转 UTF-8 `&str`，转换点唯一；
   - 内存所有权**三分类**：【借用】不得 free /【转移】必须用 core-ui 自己的 free 函数 /
@@ -161,6 +165,7 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
   - 调用**收敛 UI 线程**（`ui_window_invoke_sync`），工作线程只做 IO 与解码。
 - **代价**：
   1. **没有编译期签名检查** → 用 CI 门禁 **S8**（逐符号比对导出表）补偿；
+  1b. **签名有两个来源**（头文件 557 + 源码补 12）→ 两处都要对齐，靠 S8 兜；
   2. `UiWindowConfig` 结构体布局会漂移 → **首版完全不用它**（走 `.uix` 的 `<window>` 标签
      + `ui_page_open_window(page, NULL)`），要用之前必须核对 pinned revision 的头文件；
   3. 12 个 U 项语义未核实 → **不得凭导出名反推参数**；每接一组 API 先过对应的 U 项最小验证。
@@ -214,7 +219,19 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
   1. **Rust 必须在 `ui_page_load_string` 之前注入 `:root` 块**
      （读 `assets/themes.json` → 拼 CSS → 拼进 `.uix` 源码）。
      → 页面用 **`ui_page_load_string`**（`const char*` UTF-8）加载，**不是** `ui_page_load_file`；
-     → **`.uix` 与 `themes.json` 必须以文件形式进包**（🔴 CI 当前漏了，见 `spec/ci-contract.md` §2.4）。
+     → **`.uix` 与 `themes.json` 必须以文件形式进包**（CI 已补，见 `spec/ci-contract.md` §3.4 第 22 条）。
+     → ★ **`:root` 注入的四条硬规则**（QA B1 复核 + 架构侧核对 `sfc_parser.cpp` 确认）：
+       **(a) 必须包在 `<style>` 块内**，**禁止**裸放在源码顶层
+       （顶层只允许 `<window>` `<template>` `<script>` `<style>` `<import>` `<link>`；
+       裸放顶层 → `unexpected content at top level` → `doc.ok=false` → **整页 load 失败**，
+       报错 "SFC parse failed" 极易误判成标签问题）。
+       **推荐形态**：在源码**末尾追加一个完整的 `<style>` 块**（多个 `<style>` 块允许，
+       `sfc_parser.cpp:321-330` 无 duplicate 检查），天然保证注入值在 source order 最后。
+       **(b) `:root` 内只允许 CSS 变量声明**（`cascade.cpp:124-126` 明确
+       `Skip :root — those only define CSS vars` → `background`/`color`/`font-family` 会被**静默丢弃**）。
+       **(c) 加载前必须自检**：解析注入后的源码、断言 `:root` 落在某个 `<style>` 块内，
+       不满足即 **fail-fast**（Rust 侧直接失败并说清原因）——**不许**把错误留给 core-ui 报 "SFC parse failed"。
+       **(d) 注入必须早于 load**，且注入值要在 source order 上**最后**（自定义属性同特异性后者覆盖前者）。
   2. **Rust 初始化调用顺序**：
      `ui_theme_set_default_font` → `ui_theme_set_cjk_font` → `ui_theme_set_mode` →
      `ui_theme_set_accent_hex` → 拼 `:root` → `ui_page_load_string`。
@@ -305,10 +322,59 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
   **只定义 CSS 变量**。→ 根 `<div class="root">` + `.root { … }`。
   **修正**：前端「`window {}` 落到根节点 `.root`」的**结论对但机制要改口**
   —— 不是「window 选择器自动落到 root」，而是「window 选择器匹配不到东西，必须显式加 class」。
+- **D12-5 `:root` 注入的落点** —— `:root` 块**必须包在 `<style>` 块内**，禁止裸放源码顶层
+  （`sfc_parser.cpp:260-267` → `unexpected content at top level` → 整页失败）。
+  推荐在源码末尾**追加一个完整的 `<style>` 块**（多个 `<style>` 块允许）；
+  `:root` 内**只放 CSS 变量**（`cascade.cpp:124-126` 会跳过普通声明）；
+  Rust 侧**加载前自检**，不满足即 fail-fast。完整措辞见 **D10 契约 1** 与
+  `spec/ffi-core-ui.md` §4.3.2.1。
 - **代价**：
-  1. `.uix` 资产必须多一次机械评审（标签自闭合 / 文字位置 / 根 class / token 命名空间）；
+  1. `.uix` 资产必须多一次机械评审（标签自闭合 / 文字位置 / 根 class / token 命名空间 / `:root` 落点）；
   2. 根 `<div>` 必须显式加 `class="root"`（原来靠 `window {}` 的写法要改）；
-  3. 每条 `.uix` 硬约束都应有一条**可执行**的检查（否则靠人记）→ 并入门禁 S13 与前端自检脚本。
+  3. 每条 `.uix` 硬约束都应有一条**可执行**的检查（否则靠人记）→ 并入门禁 S13 与前端自检脚本；
+  4. Rust 侧要实现一个「`:root` 是否落在 `<style>` 内」的自检（几十行）。
+
+---
+
+## D13 无障碍与窗口材质 → **接受降级并记录**（用户 2026-11-13 拍板）
+
+**实测依据**（PM 独立核实）：core-ui **没有** Mica / Acrylic / 高对比度 / UIA 入口 ——
+`src/ui/ui_window.cpp` 的 `DwmSetWindowAttribute` 只用于 `TRANSITIONS_FORCEDISABLED` 与圆角偏好；`mica` / `acrylic` / `backdrop` 零命中；`src/ui/theme.h` 的 `HighContrast` / `AppsUseLightTheme` 零命中；`src/ui/widget.cpp` / `ui_api.cpp` 的 `uia` / `accessibility` / `narrator` 零命中。
+
+**因此必然丢失的能力**
+| 能力 | 状态 | 说明 |
+|---|---|---|
+| **高对比度模式** | ❌ 不可实现 | core-ui 自绘控件不向 UIA 暴露接口，系统高对比度不会自动接管 |
+| **读屏 / Narrator** | ❌ 不可实现 | 同上 |
+| **Mica / Acrylic 材质** | ❌ 丢失 | zsdesk 上游自己用 DWM 实现（`crates/zsdesk-app/src/theme.rs:131-194`），换 core-ui 后不复存在 |
+| 深色标题栏与窗口圆角 | ⚠️ 降级 | core-ui 只暴露圆角偏好，不暴露系统材质 |
+
+**连带动作**
+1. `docs/07-UI-DESIGN-WINUI3.md` 的视觉验收项中，Mica / Acrylic / 高对比度相关条目**按「不可实现」处理**，不再作为验收门（该文档是用户的原稿，标注写入 `docs/13` 首查清单与交付说明，不改用户原稿）。
+2. 已知限制必须写进 `DELIVERY.md` 与 `README-FORK.md`，不得只留在本台账里。
+3. `spec/milestones.md` 的 M1/M3 验收项中，不得出现「保留 Mica」这类不可实现的承诺。
+
+**复评条件**：若 core-ui 上游后续补上 UIA 桥接或系统材质入口，重新评估本决策。
+
+---
+
+## D14 品牌色 → **Rust 侧读系统 AccentColor**（用户设计文档的落地路径）
+
+**用户原稿规定**：`docs/07-UI-DESIGN-WINUI3.md` §4 的颜色 token 表里，`--accent` 明确写「**跟随系统 `AccentColor`**」。
+
+**实测能力边界**：core-ui 全仓 `GetSysColor` / `UISettings` / `AccentColor` **零命中** → core-ui 的品牌色是**内置调色板**，**不跟随系统**。`src/ui/theme.h:446-455` 的 `SetAccent()` 只接受外部传入的值（传零值即恢复库默认），库里没有任何读系统色的路径。
+
+→ 所以「跟随系统强调色」**只能由 Rust 侧实现**，否则用户原稿的这条要求落不了地。
+
+**实现路径**
+1. Rust 启动时读注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\AccentColor`（DWORD，**BGR** 序）→ 转成 `#RRGGBB`；
+2. 调 `ui_theme_set_accent_hex(hex)` 写进**库 token** `--accent` → 库自绘控件（按钮 / 焦点环 / 滑块 / 选中态）与 `.uix` 自绘区域用**同一个**强调色，不会出现「两种蓝」；
+3. **回退**：读不到（Win10 无该键 / 组策略禁用 / 值非法）→ 用 `assets/themes.json` 的 `--app-accent` 作回退源值；
+4. 切换深浅色时**重读并重调**（Win11 的深浅可能使用不同的 AccentColor），并在重建页面前完成。
+
+**与前端方案的关系**：前端已把 `.uix` 里的 accent 统一读**库 token** `var(--accent)`、`--app-accent` 只作唯一源值 —— **与本决策完全兼容**，无需改动。`--app-accent` 的定位从「直接生效的值」变为「读不到系统色时的回退值」。
+
+**代价**：Rust 侧多一处注册表读取（`windows` crate 的 `RegGetValueW`）；BGR→RGB 的通道顺序必须写对（写反了会变成橙色系）。
 
 ---
 
@@ -357,3 +423,17 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
     → 方案在 CI 产物上成立，无需降级；
   - `spec/ci-contract.md` 改为 **v3「目标态 vs 当前态」两栏** —— 修正 v2 把目标态
     写成现状的问题（4 个门禁脚本**在仓库里并不存在**），并按 CI 实现的新状态重判 33 条。
+- 2026-11-13 **第四轮（QA B1 合并 + D08 放宽 + 戳记归属）**：
+  - **合并 QA 的 B1**：`:root` 注入的落点定为「**必须包在 `<style>` 块内**」，
+    裸放源码顶层 → `unexpected content at top level` → **整页 load 失败**；
+    `:root` 内只放 CSS 变量；Rust 侧**加载前自检**、fail-fast（见 D10 契约 1 / D12-5）。
+  - **D08 放宽**：那 12 个「头文件漏声明、但源码有 `UI_API`」的符号**可正常绑定**
+    —— 签名已从上游 `src/ui/ui_api.cpp` 逐个核对取得；
+    PM 扫 pinned revision 全 `src/` → 567 个 `ui_*`，与本机 DLL 双向差集为空 → **CI 产物同样有**。
+    ★ 此前「只探测不绑定」的判断**作废**，错因是**把头文件当完备契约**。
+  - **戳记归属定稿（口径「甲：Rust 产出」）**：由 `crates/zsdesk-coreui/build.rs` 在编译期
+    写到 `target/<profile>/core-ui.dll.revision`（与 exe 同目录）；**CI 只校验内容**，
+    不自己写戳记（避免两个来源）。打包步骤不用改（它已经在拷那个路径），只需加内容断言。
+  - **S7' 拆两段**：第一段（CI 产物 vs 导出表，**本版就加**）+ 第二段（绑定层必需符号，
+    **M1 加**）。
+  - **M3 验收项**新增 V3-10/V3-11/V3-12：搜索后端不可用时**必须自动回退**且**UI 显示当前后端**。

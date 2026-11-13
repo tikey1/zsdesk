@@ -25,6 +25,37 @@ fn main() {
     let revision = resolve_revision();
     println!("cargo:rustc-env=ZSCOREUI_CORE_UI_REVISION={revision}");
     println!("cargo:rustc-env=ZSCOREUI_CORE_UI_MIN_BUILD={}", MIN_BUILD);
+
+    // 产出 revision 戳记文件（D09 / D10「甲：Rust 产出」）。
+    //
+    // 契约（见 spec/ci-contract.md §4.2）：
+    // - 写什么：revision 的 40 字符 SHA + 一个 '\n'（无 BOM）；
+    // - 写到哪：与**最终 exe 同目录** → `target/<profile>/core-ui.dll.revision`；
+    //   （CI 的打包步骤拷 `app/target/release/core-ui.dll.revision` → 不用改）
+    // - 谁校验：CI 只做**校验**（包内戳记 == packaging/core-ui-revision.txt），
+    //   不自己写戳记 —— 编译期常量才是唯一权威来源。
+    write_revision_stamp(&revision);
+}
+
+/// 把戳记写到 `target/<profile>/core-ui.dll.revision`（与 exe 同目录）。
+fn write_revision_stamp(revision: &str) {
+    let Ok(out_dir) = std::env::var("OUT_DIR") else {
+        return;
+    };
+    // OUT_DIR = <target>/<profile>/build/<pkg>-<hash>/out  → 往回 3 层是 <target>/<profile>
+    let Some(profile_dir) = std::path::Path::new(&out_dir).ancestors().nth(3) else {
+        return;
+    };
+    if !profile_dir.is_dir() {
+        return;
+    }
+    let stamp = profile_dir.join("core-ui.dll.revision");
+    if let Err(e) = std::fs::write(&stamp, format!("{revision}\n")) {
+        println!(
+            "cargo:warning=无法写出 revision 戳记 {}: {e}",
+            stamp.display()
+        );
+    }
 }
 
 /// 绑定层支持的最低 core-ui build 号。

@@ -80,46 +80,47 @@ impl std::fmt::Display for CoreUiVersion {
 /// 版本号与能力不是单调关系。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Capabilities {
-    /// `ui_dialog` 可用（头文件有声明，本机 DLL 缺失 → 缺失时用 `ui_msgbox` 兜底）。
+    /// `ui_dialog` 可用（头文件有声明，源码自 build 158 已删 → 缺失时用 `ui_msgbox` 兜底）。
     pub dialog: bool,
-    /// 「本机 DLL 独有」的 12 个符号中**存在**的（只探测，不调用）。
-    pub local_only_present: Vec<&'static str>,
-    /// 「本机 DLL 独有」的 12 个符号中**不存在**的。
-    pub local_only_absent: Vec<&'static str>,
+    /// GDI 图片视图族可用（`ui_image_view_gdi` + 8 个 `ui_image_gdi_*`）。
+    pub image_gdi: bool,
+    /// `ui_image_evict_tile` 可用。
+    pub image_evict_tile: bool,
+    /// `ui_flush_gpu` 可用。
+    pub flush_gpu: bool,
 }
 
 impl Capabilities {
-    /// 依据可选符号表 + 存在性探测判定。
-    pub fn detect(opt: &OptionalApi, local_only: &[(String, bool)]) -> Self {
-        let mut present = Vec::new();
-        let mut absent = Vec::new();
-        for (name, ok) in local_only {
-            // 名字来自 `loader::LOCAL_ONLY_SYMBOLS`（`'static`），这里只做回查。
-            let name: &'static str = crate::loader::LOCAL_ONLY_SYMBOLS
-                .iter()
-                .copied()
-                .find(|n| *n == name.as_str())
-                .unwrap_or("");
-            if ok {
-                present.push(name);
-            } else {
-                absent.push(name);
-            }
-        }
+    /// 依据可选符号表判定。
+    ///
+    /// ★ 这 12 个符号（头文件漏声明、但源码有 `UI_API`）**不是**「本机独有」：
+    /// PM 对 pinned revision 1840d689 全 `src/` 扫 `UI_API` → 567 个 `ui_*`，
+    /// 与本机 DLL 的 567 个**双向差集为空** → 仓库 main 源码里也有
+    /// → CI 从仓库 main 编出的 DLL **必然导出** → 可以正常绑定。
+    pub fn detect(opt: &OptionalApi) -> Self {
+        let image_gdi = opt.image_view_gdi.is_some()
+            && opt.image_gdi_set_parent.is_some()
+            && opt.image_gdi_set_pixels.is_some()
+            && opt.image_gdi_set_file.is_some()
+            && opt.image_gdi_clear.is_some()
+            && opt.image_gdi_get_zoom.is_some()
+            && opt.image_gdi_set_zoom.is_some()
+            && opt.image_gdi_fit.is_some()
+            && opt.image_gdi_width.is_some()
+            && opt.image_gdi_height.is_some();
         Capabilities {
             dialog: opt.dialog.is_some(),
-            local_only_present: present,
-            local_only_absent: absent,
+            image_gdi,
+            image_evict_tile: opt.image_evict_tile.is_some(),
+            flush_gpu: opt.flush_gpu.is_some(),
         }
     }
 
     /// 人类可读的能力清单（写进诊断报告与启动日志）。
     pub fn summary(&self) -> String {
         format!(
-            "dialog={} | 本机独有符号 存在 {} / 缺失 {}",
-            self.dialog,
-            self.local_only_present.len(),
-            self.local_only_absent.len()
+            "dialog={} | image_gdi={} | image_evict_tile={} | flush_gpu={}",
+            self.dialog, self.image_gdi, self.image_evict_tile, self.flush_gpu
         )
     }
 }
