@@ -495,3 +495,32 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
   - **S7' 拆两段**：第一段（CI 产物 vs 导出表，**本版就加**）+ 第二段（绑定层必需符号，
     **M1 加**）。
   - **M3 验收项**新增 V3-10/V3-11/V3-12：搜索后端不可用时**必须自动回退**且**UI 显示当前后端**。
+- 2026-11-13 **第五轮（D13 / D14 落 Spec）**：
+  - **D13（无障碍与窗口材质 → 接受降级并记录）落地**：
+    `spec/milestones.md` 新增 **§8 已知限制清单**（L1 高对比度 / L2 读屏 / L3 Mica·Acrylic /
+    L4 深色标题栏与圆角 / L5 系统强调色由 Rust 实现），含「用户原稿 §4 原文把 Mica 写成『可选』→
+    丢掉它**不违背设计意图**」的引用与**复评条件**；
+    M1 验收 **V1.1 加口径补充**（视觉对照不含 Mica / 高对比度，**不作验收门**）；
+    M3 新增验收 **V3-13**（已知限制必须随包进 `DELIVERY.md` 与 `README-FORK.md`）；
+    `spec/ci-contract.md` 新增 **§4.6c**（交付条款 + 可机械检查的形式）；
+    `SPEC.md` out-of-scope 补第 10、11 条 + 术语表补「已知限制」。
+    ★ 实测依据已由架构侧独立复核（core-ui 全仓 `GetSysColor`/`UISettings`/`AccentColor`
+    `uia`/`accessibility`/`narrator` `mica`/`acrylic`/`backdrop` **全部零命中**）。
+  - **D14（品牌色 → Rust 侧读系统 AccentColor）落地**：
+    `spec/ffi-core-ui.md` 新增 **§5.6.2**（注册表路径 / `REG_DWORD` / **BGR 序 `0x00BBGGRR`** /
+    转换公式 / 非法值当作读不到 / 回退链 / 切模式后重读重调 / 落点 / 启动日志格式）；
+    契约 2 初始化顺序加**第 0 步**；新增**规则 5**（拼 `:root` 排除 `--app-accent`）；
+    `spec/crate-layout.md` 新增 **§4.4**（启动初始化职责落点：读注册表归 `zsdesk-windows`，
+    拼装归 `zsdesk-app`，`zsdesk-coreui ↛ zsdesk-windows` → 不新增环）；
+    M1 新增产出物 **M1-9** 与验收 **V1.11**（启动日志打印 accent 值与来源）。
+    ★ **连带修正前端的一处口径**：`assets/themes.json` 的 `--app-accent` 现在是
+    **回退源值**（数据字段），**Rust 不得把它注入 `:root`**；
+    门禁 S13 因此改为**按文件类型区分**（`themes.json` 允许、`.uix` 禁止）。
+  - **戳记契约（口径「甲」）补全为可执行条款**：`spec/ffi-core-ui.md` §5.5 给出
+    「谁写 / 何时 / 写什么 / 写到哪 / CI 断言」五行 + **可直接粘贴的 PowerShell 断言**，
+    并点名 **CI 要删的那一步**（Gate G2 里 `Set-Content` 写两行戳记）；
+    `spec/ci-contract.md` §4.2 由「产出方待定」改为 **✅ 已定：Rust 产出**。
+  - **`:root` 注入的四口径定稿**（前端已按此改完 `assets/themes.json`）：
+    `spec/ffi-core-ui.md` §4.3.2.1 与 `spec/crate-layout.md` §4.3.1 **逐字一致** ——
+    ① 拼进 `<style>` 块内（Rust 统一**末尾追加完整 `<style>` 块**）；
+    ② 只允许 CSS 变量；③ 根样式走 `.root` class；④ Rust 侧加载前自检 + fail-fast。
