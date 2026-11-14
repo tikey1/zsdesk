@@ -59,7 +59,10 @@ from pe_exports import PeError, parse_exports  # noqa: E402
 #   * unexpected   → upstream later implemented it (the DLL exports it)
 # Either way it must not fail the gate, otherwise the gate would break the
 # day upstream fixes the inconsistency.
-KNOWN_NOT_IMPLEMENTED: frozenset[str] = frozenset({"ui_dialog"})
+# ★ 不用 `frozenset[str]` 注解：模块级变量注解同样不受
+# `from __future__ import annotations` 影响，在 Python 3.9 上会抛
+# "TypeError: 'type' object is not subscriptable"。
+KNOWN_NOT_IMPLEMENTED = frozenset({"ui_dialog"})
 
 # A UI_API definition: `UI_API <return type> ui_name(args)`.
 #
@@ -72,7 +75,7 @@ _DEF_RE = re.compile(r"\bUI_API\s+[^;{()]*?\b(ui_[A-Za-z0-9_]+)\s*\(", re.MULTIL
 
 def collect_definitions(roots: list[Path]) -> set[str]:
     """Gather every ui_* symbol marked UI_API in the given source trees."""
-    found: set[str] = set()
+    found = set()  # type: set[str]
     for root in roots:
         if not root.is_dir():
             continue

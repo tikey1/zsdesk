@@ -26,8 +26,11 @@
         <text-input> ×3 → <input>
         <vseparator> ×2 → <div class="vsep">
         <separator>  ×4 → <div class="divider">（见下 §2.6）
-      模板体元素数不变（30 → 30；连 <window>/<style>/<template> 三个 SFC
-      外壳一起算是 33 → 33）。
+      标签替换本身**不改元素数**（30 → 30；连 <window>/<script>/<style>/<template>
+      四个 SFC 外壳一起算是 34 → 34）。
+      ⚠️ **第七轮起本文件是 35**（外壳一起算 39）：架构裁定把 preview_host 拆成
+      「容器 + <custom id="preview_image"> + 4 个 <label class="preview-meta">」
+      ⇒ **主动新增 5 个元素**（不是标签替换）。改之前的 30 与原始文件一致。
       说明：core-ui 的 span / label 落到同一分支（LabelWidget，wrap=true，
       display=inline），两者行为一致；真正决定「换行 / 占满」的是 CSS 的
       display 与 white-space，本文件据此逐个设置。
@@ -65,24 +68,36 @@
                                                   ui_label_set_text(w, L"…") 填）
            preview_host 混合（图片+元信息）   → <div> 容器 + <custom id="preview_image">
                                                   + 预先声明的 <label> 元信息行
-      8. 【宿主标签通用规则（交付总监第四轮裁定）】
+      8. 【宿主标签通用规则（交付总监第四轮裁定 + 架构第七轮细化）】
          凡是由 Rust 自绘内容的宿主容器 → 必须是 <custom>；
-         由 core-ui 内置控件填充的宿主 → 用 <div>。
+         由 core-ui 内置控件或文本投影填充的宿主 → 用 <div> / <label>。
          理由：<div> 拿不到绘制回调（ui_custom_on_draw 内部是
          As<ui::CustomWidget>，取不到就静默 no-op），且运行时挂载的控件没有
          CSS 级联结果 → flex 规则失效 → 尺寸 0 → 区域空白且无任何报错。
-         按此规则（架构 D06 / D07 / D12）：
-           list_host    Rust 自绘（文件列表）   → <custom>  ✔ 已改
-           nav_host     Rust 自绘（导航树）     → <custom>  ✔ 已改
-           breadcrumb   core-ui 控件（标签序列）→ <div>     保持
-           preview_host core-ui 控件（<gh-img-view> 等）→ <div> 保持
+         按此规则逐个判定（判定来源见架构 D06 / D06-1 / D07 / D12）：
+           list_host    Rust 自绘（文件列表）      → <custom> ✔ 已改
+           nav_host     Rust 自绘（导航树）        → <custom> ✔ 已改
+           breadcrumb   文本投影（Rust 写路径文字）→ <label>  ✔ 已改
+                                                      （原为**空 <div>** → 显示不出
+                                                        任何东西；Rust 用
+                                                        ui_label_set_text(w, L"…") 填）
+           preview_host 混合（Rust 画图 + 文本行）  → <div> 容器 ✔ 保持
+                                                      内含 <custom id="preview_image">
+                                                      + 4 个 <label class="preview-meta">
+                                                      （**谁画这张图** = Rust 在
+                                                        <custom> 里 blit，D06-1）
          与 D-15 相容：<custom> 是空的自绘画布，「行」仍全部由 Rust 画。
+         ⚠️ **preview_host 不能整体改成 <custom>**：<custom> 是空的自绘画布，
+            改成它就**丢掉那 4 行 <label> 元信息**（架构 D06-1 的混合容器形态）。
 
     三、已知遗留（须真机确认，见 docs/13-UIX-FIRST-RENDER-CHECKLIST.md）
       · 标签选中态的 2px accent 指示条（docs/07 §2）**已从 .uix 删除**：
         core-ui 不支持 border-bottom，且该 class 没有任何元素使用、还会与
-        --app-* 混用库 token。指示条由 Rust 自绘，或在 .uix 里用 2px 高的
-        <div> 实现（见 docs/12 §5 R6）。
+        --app-* 混用库 token。
+        ⚠️ **不能退而用「2px 高的 <div>」**：.uix 是静态布局，且 core-ui 没有
+        运行时设置 class 的 C API → 表达不了「哪个标签被选中」→ 指示条必须
+        由 Rust 在 <custom> 的 draw 回调里画（架构第七轮硬约束第五条）。
+        详见 docs/12 §5 R6。
       · font-family 对普通 LabelWidget 不生效（仅 SVG 文本读取该属性），
         实际字体由 Rust 调 ui_theme_set_default_font / ui_theme_set_cjk_font
         决定；.root 上的声明仅作设计记录。

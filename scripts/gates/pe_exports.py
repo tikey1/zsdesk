@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import struct
 import sys
+from typing import Optional
 
 
 class PeError(RuntimeError):
@@ -85,7 +86,7 @@ def parse_exports(data: bytes) -> list[str]:
 
     # Section headers follow the optional header.
     sec_off = opt + size_of_optional_header
-    sections: list[tuple[int, int, int, int]] = []
+    sections = []  # type: list[tuple[int, int, int, int]]
     for i in range(number_of_sections):
         base = sec_off + i * 40
         virtual_size = _read_u32(data, base + 8)
@@ -105,7 +106,7 @@ def parse_exports(data: bytes) -> list[str]:
     ordinals_off = _rva_to_offset(address_of_name_ordinals, sections)
     funcs_off = _rva_to_offset(address_of_functions, sections)
 
-    names: list[str] = []
+    names = []  # type: list[str]
     for i in range(number_of_names):
         name_rva = _read_u32(data, names_off + i * 4)
         name_file_off = _rva_to_offset(name_rva, sections)
@@ -127,8 +128,11 @@ def parse_exports(data: bytes) -> list[str]:
 
 def main(argv: list[str]) -> int:
     args = [a for a in argv[1:] if not a.startswith("--")]
-    prefix: str | None = None
-    out_path: str | None = None
+    # ★ 用 Optional 而不是 `str | None`：局部变量注解不受
+    # `from __future__ import annotations` 影响（那只作用于模块/类/函数签名），
+    # 在 Python 3.9 上 `str | None` 会在运行时抛 TypeError。
+    prefix = None  # type: Optional[str]
+    out_path = None  # type: Optional[str]
 
     i = 1
     while i < len(argv):

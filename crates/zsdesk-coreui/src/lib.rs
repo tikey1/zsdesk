@@ -30,12 +30,12 @@
 //! # 用法（骨架示意，不是业务逻辑）
 //!
 //! ```no_run
-//! use zc_ffi_coreui::CoreUi;
+//! use zsdesk_coreui::CoreUi;
 //!
 //! let core = CoreUi::load_default()?;              // 找不到就大声失败
 //! println!("core-ui {} @ {}", core.version, core.dll_path.display());
 //! println!("能力：{}", core.capabilities.summary());
-//! # Ok::<(), zc_ffi_coreui::LoadError>(())
+//! # Ok::<(), zsdesk_coreui::LoadError>(())
 //! ```
 
 #![deny(missing_debug_implementations)]

@@ -3,8 +3,10 @@
 
     D-15: static preview pane layout only. No event attributes, no scripts with
     business logic. Rust owns channel selection, decoding and buffer release.
-    GuoheView.exe is NOT used here; the priority channel is the in-DLL
-    ui_gh_img_view_* family (architecture 6.3), with bitmap and text fallbacks.
+    GuoheView.exe is NOT used here.
+    ⚠️ 图片承载方式见下方 §四 / §五：**Rust 在 <custom id="preview_body"> 里 blit**
+    （架构 D06-1）；core-ui 的 <gh-img-view> 瓦块金字塔喂数在 SPEC.md §8 第 7 条
+    是 out-of-scope。
 
     ---------------------------------------------------------------------------
     2026-11-13  core-ui 标签修正
@@ -45,17 +47,23 @@
     三、主题 token：全部改用 --app-* 前缀，避开 core-ui 自有的 34 个库 token，
       详见 docs/12-UIX-TAG-FIX.md 与 assets/themes.json。
 
-    四、宿主标签（第五轮按「内容是不是 Rust 用绘制指令画出来的」判定）
-      preview_body 是图片位 → Rust 在 draw 回调里 blit → <custom>
-      （架构未点名本文件，按同一条规则推出；若裁决不同请告知，改回一行即可）
+    四、宿主标签（第五轮按「内容是不是 Rust 用绘制指令画出来的」判定；
+      第九轮架构已确认）
+      preview_body 是图片位 → Rust 在 draw 回调里 blit（ui_bitmap_create →
+      ui_draw_bitmap_handle，架构 D06-1）→ <custom>
+      （第五轮时架构未点名本文件，按同一条规则推出；第九轮架构已确认）
 
-    五、宿主标签（交付总监第四轮裁定的通用规则）
+    五、宿主标签通用规则（交付总监第四轮裁定）
       凡是由 Rust 自绘内容的宿主容器 → 必须是 <custom>；由 core-ui 内置控件
-      填充的宿主 → 用 <div>。<div> 拿不到绘制回调（ui_custom_on_draw 内部是
-      As<ui::CustomWidget>，取不到就静默 no-op），且运行时挂载的控件没有
-      CSS 级联结果 → flex 规则失效 → 尺寸 0 → 区域空白且无任何报错。
-      本文件的 preview_body 由 core-ui 控件填充（<gh-img-view> 等，架构 D06）
-      → 保持 <div>。
+      或文本投影填充的宿主 → 用 <div> / <label>。<div> 拿不到绘制回调
+      （ui_custom_on_draw 内部是 As<ui::CustomWidget>，取不到就静默 no-op），
+      且运行时挂载的控件没有 CSS 级联结果 → flex 规则失效 → 尺寸 0 →
+      区域空白且无任何报错。
+      本文件的唯一宿主 preview_body 是 **Rust 自绘的图片位** → <custom> ✔
+      ⚠️ **不能用 core-ui 的 <gh-img-view> 填**：它的喂数 API
+      （ui_gh_img_view_begin / set_tile 等瓦块金字塔喂数）在 SPEC.md §8
+      第 7 条是**明确的 out-of-scope**；且 ui_image_view() 是运行时创建的控件
+      → 拿不到 CSS → 尺寸只能手算 px，布局风险不可控（架构 D06-1）。
 -->
 <window title="预览" width="320" height="600" />
 <style>

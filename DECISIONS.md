@@ -905,3 +905,24 @@ $PSNativeCommandUseErrorActionPreference = $false
   - **`<link>` 残留缺口入契约**：「顶层块顺序无关」**只对 inline `<style>` 成立** —— `<link>` 的 CSS 恒排在 inline 之前
     （`page_api.cpp:271-277`）→ `<link>` 的 CSS 里若有 `:root`，注入值仍会输；本项目零 `<link>` → 前提成立（Rust 自检断言 2 会查）。
   - **运维 P0 闭环** ✅：`package` job 已补 `zsui` 检出；根目录无 `.gitmodules` → 印证 H2 订正。
+- 2026-11-14 **第十三轮（第 9 次 CI 结果回写 + 三条决策）**：
+  - **D21 关闭**：core-ui 的 C++ 源码构建在 run `43398079661` 的 core-ui job 第 10 步 = **success**，
+    后续 G2 / S7 全绿 ⇒ **D17 的根因诊断经真实 CI 证实**（前 4 次失败确实不是编译错误，
+    是 `$PSNativeCommandUseErrorActionPreference` 中断了日志管道）。
+    「改用 `cl.exe` / 本机 GuoheView 定制 DLL」的退路**不启用**，仅留 `docs/15` §2.1 备查。
+  - **D22（新）CI 的 Python 版本必须钉死**：runner 镜像自带的 `python` 会随镜像漂移，
+    而门禁脚本对 3.9 / 3.10+ 的注解语法敏感 —— `from __future__ import annotations`
+    **不作用于模块级与局部变量注解**（当时的 `frozenset[str]` / `str | None` 在 3.9 会直接抛错）。
+    → rust / core-ui 两个 job 各加 `setup-python@v5` 固定 **3.11**；
+    同时把三个门禁脚本改成 `# type:` 注释形式、保持 3.9 兼容。**双保险**：
+    即使将来去掉 setup-python，脚本也不会因语法炸掉。
+  - **D23（新）失败原因必须走公开通道**：GitHub 的 job 日志下载端点需 admin
+    （实测 `403 Must have admin rights to Repository.`），外部读不到；
+    public repo 的 **check-run annotations 公开可读** ⇒
+    凡可能失败的步骤（`cargo test` / 五个 S13 门禁 / Gate S7'）必须把判定理由
+    emit 成 `::error::`。**「失败了但看不到为什么」本身就是需要修的缺陷。**
+  - **事实更正**：第 9 次 CI 的 rust job 在第 6 步 `Test` 就失败
+    （`lib.rs` doctest 仍写骨架期 crate 名 `zc_ffi_coreui`），
+    **后续 S13 门禁与 `cargo build` 一步都没跑到** ⇒
+    「五个门禁已在 CI 里执行过」不成立，第 9 次 CI 实际只执行了 S7' 一个门禁
+    （且它失败了，原因未定位，已按 D22 / D23 加探针）。

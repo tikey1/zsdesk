@@ -45,9 +45,33 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@1.99.0
 
+      # ★ 钉住 Python 版本。runner 镜像里的默认 `python` 会随镜像漂移，
+      # 而门禁脚本对版本敏感（3.9 与 3.10+ 的注解语法差异是真实踩过的坑）。
+      # 固定 3.11 ⇒ 门禁行为只取决于脚本本身，不取决于 runner 镜像。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ★ 失败必须【看得见】。job 日志的下载端点需要 admin 权限，外部读者
+      # 只能通过 check-run annotations 看到结论 ⇒ 失败时把关键行打成
+      # `::error::` annotation，否则失败原因对外完全不可见。
       - name: Test
         working-directory: app
-        run: cargo test --workspace --release --locked
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          cargo test --workspace --release --locked 2>&1 | Tee-Object -FilePath test-output.txt
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Write-Host '::error title=cargo test::cargo test 失败，下面是关键行：'
+            Get-Content test-output.txt |
+              Select-String -Pattern 'error\[|error:|FAILED|panicked|test result: FAILED|failures:' |
+              Select-Object -First 25 |
+              ForEach-Object { Write-Host ("::error title=cargo test::" + $_.Line.Trim()) }
+            exit $code
+          }
+          Write-Host 'cargo test passed.'
 
       # 四个机械门禁（S13 系列）。★ 必须在 CI 里真正执行 ——
       # 「没有执行器的规则只是建议」：写在文档里但 CI 不跑的门禁，
@@ -67,10 +91,20 @@ jobs:
           foreach ($g in $gates) {
             $path = Join-Path $env:GITHUB_WORKSPACE "app\scripts\gates\$g"
             Write-Host "---- $g ----"
-            python $path --root (Join-Path $env:GITHUB_WORKSPACE 'app')
-            if ($LASTEXITCODE) {
+            $out = & python $path --root (Join-Path $env:GITHUB_WORKSPACE 'app') 2>&1
+            $code = $LASTEXITCODE
+            $out | ForEach-Object { Write-Host $_ }
+            if ($code -ne 0) {
               $failed += $g
-              Write-Host "::error title=gate $g::门禁未通过（exit=$LASTEXITCODE）"
+              Write-Host "::error title=gate $g::门禁未通过（exit=$code）"
+              # 脚本的判定理由必须同时进 annotation —— 否则外部只看到
+              # 「门禁未通过」四个字，不知道是哪一条契约被违反。
+              # 取【末尾】若干行：判定理由是脚本最后打印的。
+              $out | Select-Object -Last 20 |
+                ForEach-Object {
+                  $line = ([string]$_).Trim()
+                  if ($line) { Write-Host ("::error title=gate $g::" + $line) }
+                }
             }
           }
           if ($failed.Count -gt 0) {
@@ -128,6 +162,12 @@ jobs:
       - uses: ilammy/msvc-dev-cmd@v1
         with:
           arch: x64
+
+      # ★ 钉住 Python 版本（门禁脚本对 3.9 / 3.10+ 的注解语法敏感，
+      # runner 镜像的默认 python 会随镜像漂移 ⇒ 行为不可复现）。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
 
       - name: Locate clang-cl and llvm-rc
         id: toolchain
@@ -375,12 +415,26 @@ jobs:
       - name: Gate S7' — the DLL export surface must match the source contract
         shell: pwsh
         run: |
-          python app/scripts/gates/coreui_export_gate.py `
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $out = & python app/scripts/gates/coreui_export_gate.py `
             --dll "${{ env.GITHUB_WORKSPACE }}\core-ui\clang-cl-build\core-ui.dll" `
             --source-dir "${{ env.GITHUB_WORKSPACE }}\core-ui\src" `
             --include-dir "${{ env.GITHUB_WORKSPACE }}\core-ui\include" `
-            --doc "${{ env.GITHUB_WORKSPACE }}\app\docs\05-COREUI-EXPORTS.txt"
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            --doc "${{ env.GITHUB_WORKSPACE }}\app\docs\05-COREUI-EXPORTS.txt" 2>&1
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) {
+            # 失败原因必须进 annotation：job 日志需 admin 才能下载，
+            # 外部唯一可见的通道就是 check-run annotations。
+            Write-Host "::error title=Gate S7'::导出面与源码契约不一致（exit=$code）"
+            $out | Select-Object -Last 25 | ForEach-Object {
+              $line = ([string]$_).Trim()
+              if ($line) { Write-Host ("::error title=Gate S7'::" + $line) }
+            }
+            exit $code
+          }
+          Write-Host 'Gate S7-prime passed.'
 
       - name: Upload core-ui.dll
         uses: actions/upload-artifact@v4

@@ -19,3 +19,6 @@
 /releases/**/*.dll
 /releases/**/*.zip
 /releases/**/*.lnk
+
+# WorkBuddy 的本地项目数据（记忆 / 快照 / 索引）—— 不属于源码
+/.workbuddy/

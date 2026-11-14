@@ -28,9 +28,12 @@
         （窗口底纯白 `#FFFFFF` / 文字 `#242424` / **分隔线直接消失** —— 分隔线已是
          `<div class="divider">`，`--app-divider` 未定义时 `background` 解析失败 → 画不出来）
   - [ ] **【P0】注入发生在 `ui_page_load_string` 之前**（时序错了同上，静默回落库色）
-  - [ ] **【P0】切主题若走「重建页面」：旧 page 已 `ui_page_destroy` + 32 个句柄全部重取**
-        —— 新 page ⇒ 旧 `ui_widget_find_by_id` 句柄全部失效，继续用会写到野内存
-  - [ ] **【P0】注入的 `:root` 是源码中【第一个】`:root`**（自定义属性**先定义者赢**：`LookupVar` 返回第一个命中，`value.cpp:573-581`；`:root` 规则不进 CSS 级联，`cascade.cpp:124-125`）—— 若 `.uix` 自带 `:root` 且排在注入块之前，注入值被**静默忽略**。当前三个 `.uix` 生效 `:root` 规则数 = 0 ✓
+  - [ ] **【P0】切主题若走「重建页面」：32 个旧句柄已逐个 `ui_widget_destroy` 摘掉，
+        旧 page 已 `ui_page_destroy`，且 32 个新句柄全部重取**
+        —— **顺序：先摘句柄 → 再销毁页**（否则句柄表的 `shared_ptr` 把旧页整棵控件子树吊着不放）
+        —— 新 page ⇒ 旧 `ui_widget_find_by_id` 句柄全部失效；继续用它们 = **静默无效**
+        （写成功、API 不报错、**界面毫无变化**），**不是崩溃**（依据见 `docs/12` §4.4 的机制更正）
+  - [ ] **【P0】注入的 `:root` 是源码中【第一个】`:root`**（自定义属性**先定义者赢**：`LookupVar` 返回第一个命中，`value.cpp:572-579`；`:root` 规则不进 CSS 级联，`cascade.cpp:124-125`）—— 若 `.uix` 自带 `:root` 且排在注入块之前，注入值被**静默忽略**。当前三个 `.uix` 生效 `:root` 规则数 = 0 ✓
   - [ ] 口径提醒：`text="..."` 属性无效，**只针对本仓库 `.uix` 资产的写法**。
         **Rust 侧向 `.uix` 注入状态是合法通道**（`ui_page_set_*` + 模板里的 `{{ }}` 插值），
         不要把这条误当成"Rust 侧也不能注入文本"。
@@ -120,12 +123,12 @@
 
 | # | 看什么 | 期望 | 异常怎么定位 |
 |---|---|---|---|
-| H1 | **32 个 id** 是否都能被 Rust 取到 | `ui_widget_find_by_id` 全部命中（main **26** + preview 6；原有 27 个 + 第七轮新增 5 个） | 取不到 → 检查该元素是否被改成了 core-ui 不支持的标签（现在全部支持）；空句柄 → Rust 侧 id 字符串写错 |
+| H1 | **32 个 id** 是否都能被 Rust 取到 | `ui_widget_find_by_id` 全部命中（main **26** + preview 6；原有 27 个 + 第七轮新增 5 个） | 取不到 → 检查该元素是否被改成了 core-ui 不支持的标签（现在全部支持）；空句柄 → Rust 侧 id 字符串写错。<br>**期望清单的单一事实源 = `assets/ui-ids.json`**（32 个 id，main 26 / preview 6 / about 0）⇒ 真机前先跑 `scripts/gates/ui_id_manifest_check.py`（校验「清单 == 实际 id 集合」，还查同页重 id —— 重 id 会让 `FindById` 的 DFS **首个命中**遮蔽另一个且**不报错**，见架构 D12-11） |
 | H2 | 标题栏应用名 | 显示 `tabbed_files` | 空白 → ① 用了 `text=` 属性（不生效）② 文字写在标签外 ③ 该 label 是 inline 但被 0 宽容器裁掉 |
 | H3 | 标签栏占位文字 | 显示「标签页由 Rust 侧 TabManager 提供」 | 空白 → 同 H2；这条最容易踩：`text=` 属性在 `.uix` 里不生效 |
 | H4 | 命令栏提示 | 显示「后退 前进 上级 刷新 · 查看 排序 预览」 | 空白 → 同 H2 |
 | H5 | 状态栏 6 个片段 | Rust 写入后各自显示（`ui_label_set_text`） | 写入后不显示 → 该元素不是 LabelWidget（本轮全部是 `<span>` → LabelWidget，可写）；或 Rust 用错了句柄 |
-| H6 | 面包屑 / 导航 / 列表 / 预览 四个宿主区（**第七轮后形态变了**） | **导航区 `<custom id="nav_host">`、列表区 `<custom id="list_host">`**（Rust 自绘）；**面包屑 `<label id="breadcrumb">`**（文本投影，Rust 用 `ui_label_set_text` 填）；**预览区 `<div id="preview_host">` 容器** = `<custom id="preview_image">`（图片位，Rust blit）+ 4 行 `<label class="preview-meta">` 元信息 | 整个区域空白且**连底色都没有** → 该宿主的 `flex`/`width` 没生效，或被父级压成 0；<br>导航 / 列表 / 图片位空白但**宽度正常** → Rust 还没把 `ui_custom_on_draw` 挂上（对非 CustomWidget 是**静默 no-op**）；<br>宽度**为 0** → 宿主不是 `<custom>`（`<div>` 宿主拿不到 CSS 级联 → 尺寸 0）；<br>导航区宽度**不是 220px** → `.nav-host { width: 220px }` 没生效；<br>**面包屑整行空白** → Rust 还没调 `ui_label_set_text(w, L"…")`（`<label>` 默认无文本）；<br>**元信息行空白但区域有色** → 同理，Rust 未投影文本 |
+| H6 | 面包屑 / 导航 / 列表 / 预览 四个宿主区（**第七轮后形态变了**） | **导航区 `<custom id="nav_host">`、列表区 `<custom id="list_host">`**（Rust 自绘）；**面包屑 `<label id="breadcrumb">`**（文本投影，Rust 用 `ui_label_set_text` 填）；**预览区 `<div id="preview_host">` 容器** = `<custom id="preview_image">`（图片位，Rust blit）+ 4 行 `<label class="preview-meta">` 元信息 | 整个区域空白且**连底色都没有** → 该宿主的 `flex`/`width` 没生效，或被父级压成 0；<br>导航 / 列表 / 图片位空白但**宽度正常** → Rust 还没把 `ui_custom_on_draw` 挂上（对非 CustomWidget 是**静默 no-op**）；<br>宽度**为 0** → 宿主不是 `<custom>`（`<div>` 宿主拿不到 CSS 级联 → 尺寸 0）；<br>导航区宽度**不是 220px** → `.nav-host { width: 220px }` 没生效；<br>**面包屑整行空白** → Rust 还没调 `ui_label_set_text(w, L"…")`（`<label>` 默认无文本，**只有壳没有字**）；<br>**元信息行空白但区域有色** → 同理，Rust 未投影文本；<br>⚠️ **这两条的共同陷阱：现象是「整行空白、零报错」**，与「切主题后旧句柄失效」是**同一种静默**（见 §0 P0 第 4 条）⇒ 排查顺序：<br>① Rust 侧**有没有调** `ui_label_set_text`（`include/ui_core.h:1134`，参数是 **UTF-16 `wchar_t*`**，不是 UTF-8 `char*` —— 传错类型会编译不过或写进空串）；<br>② 句柄是不是**切主题前的旧句柄**（写了没反应但 API 不报错 → 先怀疑句柄，而不是怀疑文本）；<br>③ 该元素的 id 在**当前 page** 上是否取得到（`assets/ui-ids.json` 是期望清单的单一事实源）；<br>④ 元素本身是不是 LabelWidget —— 本轮 `#breadcrumb` 与 4 个 `preview_host_*` 都是 `<label>`（`widget_factory.cpp:942-954` → `LabelWidget`），`ui_label_set_text` 对非 LabelWidget 是**静默 no-op**（`As<ui::LabelWidget>` 取不到就 return） |
 | H7 | 关于面板 | 标题 + 13 条条目 + 2 条分隔线；长条目**在窗宽内折行** | 横向溢出 → `.row` / `.heading` 缺 `display: block` |
 | H8 | 预览窗格 | 标题「预览」+ 分隔线 + 正文区 + 4 行提示 | 标题不显示 → 同 H2 |
 | H9 | 首版只读 | 命令栏**没有**新建/重命名/删除/剪贴板入口 | 出现写操作 → 资产被误改 |
@@ -182,9 +185,19 @@
   （**分隔线色差不再是 P2** —— 第二轮已把 `<separator>` 全换成 `<div>`，
   分隔线现在走项目 token `--app-divider`，与设计稿一致；见 §2.6 / L9 / C5。）
 
-**回退点**：本轮改动已全部落盘且**元素总数不变**（main 33 / preview 12 / about 19），id 一个没动，
-出现系统性偏差时可直接 `git checkout HEAD -- assets/main.uix assets/preview.uix assets/about.uix assets/themes.json`
-回到原资产，再按本文档的分项结论逐项重做，不必整体回滚。
+**回退点**：本轮改动已全部落盘。⚠️ **「元素总数不变」这句话只对「标签替换」那一轮成立**：
+标签替换本身不改元素数（main 30 → 30，含 SFC 外壳 34 → 34）；
+但**第七轮起 main 是 35**（外壳 39）—— 架构裁定把 `preview_host` 拆成
+「容器 + `<custom id="preview_image">` + 4 个 `<label class="preview-meta">`」，
+**主动新增 5 个元素**；**id 也从 27 个变成 32 个**（新增 `preview_image` + 4 个 `preview_host_*`）。
+**现行数字（单一事实源）**：`assets/ui-ids.json`（id 清单，32 个）+ `scripts/gates/uix_tag_check.py`
+的期望值（模板体元素数 **35 / 9 / 16**）。
+
+**回退到「修正前」的原始资产**：`git checkout 6ea629f -- assets/main.uix assets/preview.uix assets/about.uix`
+（**不是 `HEAD`** —— 本次修正本身已提交，`HEAD` 返回的就是修正后的文件，checkout 回去等于没退）。
+⚠️ 回退会**丢掉第七轮的 5 个新元素与 5 个新 id** ⇒ 回退后必须同步改
+`assets/ui-ids.json` 与 `uix_tag_check.py` 的期望值，否则两个门禁会立刻 FAIL
+（**这是设计意图**：数字漂移要被抓到，不是被静默接受）。
 
 ---
 

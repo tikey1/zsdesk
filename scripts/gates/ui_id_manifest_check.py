@@ -78,7 +78,7 @@ def main() -> int:
         print(f"FAIL: {manifest_path} has no 'pages' object", file=sys.stderr)
         return 1
 
-    problems: list[str] = []
+    problems = []  # type: list[str]
     total = 0
 
     for page_name, spec in pages.items():
@@ -93,7 +93,7 @@ def main() -> int:
         expected = list(spec.get("ids", []))
 
         # 重复 id：第二个会遮蔽第一个。
-        seen: set[str] = set()
+        seen = set()  # type: set[str]
         for i in actual:
             if i in seen:
                 problems.append(f"{page_name}: {file_name} 里 id 重复：{i}")
