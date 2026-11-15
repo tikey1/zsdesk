@@ -9,17 +9,18 @@
 ## 0. 一句话现状
 
 Rust 侧的 core-ui 绑定层（`crates/zsdesk-coreui/`）与 CI 契约已经落地，
-**六个机械门禁全部接进 CI**；
-**core-ui 的 C++ 源码构建连续两次（第 9 / 10 次 CI）成功** —— M0 的最大未知已消除。
-第 10 次 CI 靠本次装的 `::error::` 探针，把此前两处「看不到原因」的失败**全部定位到确切根因**：
-`cargo test` 是 `Cargo.lock` 与 workspace 不同步，Gate S7' 是
-`${{ env.GITHUB_WORKSPACE }}` 求值为空。两处均已在本地修好，
-**待第 11 次 CI 复验**；package job 至今仍被上游失败连带跳过，尚未真正执行。
+`scripts/gates/` 共 8 个脚本（7 个独立门禁 + 1 个 PE 解析辅助库；2026-11-15 新增 S14 Rust 模块布局门禁并接进 CI）；
+**core-ui 的 C++ 源码构建连续三次（第 9 / 10 / 11 次 CI）成功**，第 11 次连
+Gate S7' 也转绿 ⇒ M0 的最大未知已消除。
 
-2026-11-14 又按成员复核结论修了三处（均**尚未推送、待第 11 次 CI**）：
-`theme_contrast_check.py` 的缺/空资产静默 PASS（P0）、`probe.rs` 传给
-`ui_page_load_string` 的字符串缺 NUL 结尾（P0）、package job 全 12 步零 `::error::`
-（失败原因对外不可见）。详见 §1 表格末尾三行。
+第 10 次 CI 靠 `::error::` 探针定位的两处真因（`Cargo.lock` 不同步 /
+`env.GITHUB_WORKSPACE` 空值）已在 `aa7e9b5` 修复并推送，第 11 次 CI 证实有效。
+**但第 11 次 CI 的 rust job 又在 Test 失败**：真因是 `zsdesk-coreui` 的
+5 个 `mod` 声明找不到模块文件（`error[E0583]`）—— 这个 crate 此前从未被
+rustc 编译过。详见 §0.3。
+
+2026-11-15 已按第 11 次 CI 返回的报错修好模块布局并加门禁，**这批修复尚未推送，
+待第 12 次 CI**；`package` job 至今仍被上游失败连带跳过，**从未真正执行**。
 
 ---
 
@@ -71,18 +72,54 @@ tomllib 复验：127 包 / 有序 / 零歧义引用 / 零悬空引用。
 **双保险**：本机无 Rust 工具链且缺 `zsui` path 依赖，无法本地跑 `cargo test` 验证锁文件。
 故在 Test 的失败分支加了一条自诊断：若报错含 `--locked`，就让 CI 跑
 `cargo metadata` 并把 `git diff -- Cargo.lock` 打进 annotations ⇒
-万一本地修得不全，第 11 次 CI 会直接回传 cargo 期望的准确改动。
+万一本地修得不全，后续 CI 会直接回传 cargo 期望的准确改动。
+（**第 11 次 CI 未触发该分支** ⇒ 锁文件已修全，见 §2.1b。）
+
+---
+
+## 0.3 第 11 次 CI（run `43666238286`，commit `aa7e9b5`）实测结果
+
+> 步骤一律用**步骤名**，不写编号 —— §0.1 / §0.2 的编号是各轮自己的口径，
+> 插入 `setup-python` 后已漂移，继续沿用只会制造新的不一致。
+
+| job | 步骤名 | 结果 | 结论 |
+|---|---|---|---|
+| core-ui | 全部（Configure and build / PE / G2 / S7 / S7' / upload） | **success** | C++ 源码构建第三次成功 |
+| core-ui | Gate S7' — the DLL export surface must match the source contract | **success** | ★ `${{ env.GITHUB_WORKSPACE }}` → `$env:GITHUB_WORKSPACE` + `Join-Path` 的修复**已由真实 CI 证实** |
+| Rust | Test | **failure** | 公开 annotations 给出 5 条 `error[E0583]: file not found for module` |
+| Rust | Gate S13 / Build the full edition / Clippy / Upload the executable | skipped | Test 失败即跳过后续 |
+| package | 全部 | skipped | `needs: [rust, core-ui]` 未满足 |
+
+**真因 C —— Rust 模块布局**（不是 `Cargo.lock`，也不是 Python）：
+`crates/zsdesk-coreui/src/lib.rs` 是 crate root，里面写的是裸 `pub mod api;` 等 5 条；
+而模块文件全部放在 `crates/zsdesk-coreui/src/lib/*.rs`。Rust 2018+ 默认只为
+`mod X;` 查找 `src/X.rs` 或 `src/X/mod.rs`，**不会进 `src/lib/`** ⇒
+`api` / `loader` / `theme` / `ui_thread` / `version` 全部 E0583 ⇒
+`error: could not compile zsdesk-coreui (lib) due to 5 previous errors`。
+本机无 cargo/rustc，且此前 10 次 CI 都在更早的环节失败，所以这批 `.rs` 文件
+**一次都没被编译过**，静态复核（含 tree-sitter 语法级）抓不到布局错。
+
+**修法**：不搬文件（全仓 7 份文档按 `src/lib/*.rs` 引用），改在 5 条 `mod` 声明前
+加 `#[path = "lib/xxx.rs"]`，显式钉住布局。另加机械门禁
+`scripts/gates/rust_module_layout_check.py` 复现 Rust 的模块解析规则，
+并接进 `build.yml` 的 `cargo test` **之前**（rust job 10 → 11 步）——
+「编译前就能发现的问题不该浪费一整轮 CI」。
+
+**仍未验证**：修完 E0583 后才轮到 rustc 真正编译这 5 个文件，可能还有类型 /
+借用检查错误；`probe.rs` 也从未编译过。只能由第 12 次 CI 逐层回答。
 
 ---
 
 ## 1. 已写入磁盘的改动与静态复核记录
 
-> **口径（2026-11-14 更正）**：本表混合两类条目 —— ① 已随 `1a00121` 推送的历史项；
-> ② 第 10 次 CI 之后在**本地**修好、`git status` 仍为 `M`、**尚未推送**的项
-> （表格末尾三行已逐行标注）。
+> **口径（2026-11-15 更新）**：本表混合三类条目，逐行带标签 ——
+> ① 已随 `1a00121` 推送的历史项；② 已随 `aa7e9b5` 推送、并由**第 11 次 CI 证实
+> core-ui/Gate S7' 修复有效**的项（标「已于 aa7e9b5 推送」）；
+> ③ 2026-11-15 按第 11 次 CI 报错新修、`git status` 仍为 `M`、**尚未推送**的项
+> （表格末尾两行）。
 > 本机**无 cargo / rustc** 且缺 `zsui` path 依赖 ⇒ 本表所有「验证」都只是
-> **静态 / 本机脚本级复核**，一律不代表「已通过编译或测试」；编译结论只能由第 11 次 CI 回答。
-> 旧标题「已通过本地验证」措辞过强，已收敛。
+> **静态 / 本机脚本级复核**，一律不代表「已通过编译或测试」；编译结论只能由
+> 第 12 次 CI 回答。旧标题「已通过本地验证」措辞过强，已收敛。
 
 | 项 | 文件 | 验证方式 |
 |---|---|---|
@@ -98,21 +135,35 @@ tomllib 复验：127 包 / 有序 / 零歧义引用 / 零悬空引用。
 | doctest crate 名修正 | `crates/zsdesk-coreui/src/lib.rs` | `zc_ffi_coreui` → `zsdesk_coreui`（2 处）；`lib.rs` 内已清除，但**全仓并非零残留** —— 本行与 `DECISIONS.md` 第十三轮仍保留该串作为历史说明 |
 | Python 版本钉死 + 3.9 兼容修正 | `.github/workflows/build.yml` + `scripts/gates/{pe_exports,coreui_export_gate,ui_id_manifest_check}.py` | 两个 job 各加 `setup-python@v5`（3.11）；ast 扫描确认全部门禁脚本 3.9 兼容 |
 | 失败原因可视化（annotation 探针） | `.github/workflows/build.yml` | `cargo test` / S13 门禁 / Gate S7' 三处补 `::error::`，失败原因可经**公开** check-run annotations 读取；**第 10 次 CI 靠它一次定位两个真因** |
-| `Cargo.lock` 规范化 | `Cargo.lock` | **【本轮本地修复，未推送】** `libloading` 依赖改 `cfg-if` + `windows-link`、127 包按 `(name,version)` 重排、块间空行规范；tomllib 复验：有序 / 零歧义 / 零悬空引用 |
-| Gate S7' 路径修复 | `.github/workflows/build.yml` | **【本轮本地修复，未推送】** 4 个参数由 `${{ env.GITHUB_WORKSPACE }}`（求值为空）改用 `$env:GITHUB_WORKSPACE` + `Join-Path` |
-| lock 漂移自诊断（双保险） | `.github/workflows/build.yml` | **【本轮本地修复，未推送】** Test 失败且报错含 `--locked` 时，跑 `cargo metadata` 并把 `git diff -- Cargo.lock` 打进 annotations |
-| 门禁空过修复（P0） | `scripts/gates/theme_contrast_check.py` | **【2026-11-14 本轮，未推送】** 缺/空资产不再 `continue`，缺资产 / 0 字节 / 无 `<template>` / 零文字元素一律 FAIL；本地 4 组负控 EXIT 符合预期。顺带统一 G05 口径：先剥注释与 `<script>`，不再把注释里的说明文字当成渲染文字 |
-| smoke-probe 字符串传参修复（P0） | `crates/zsdesk-coreui/examples/probe.rs` | **【2026-11-14 本轮，未推送】** `ui_page_load_string` 改传 NUL 结尾缓冲（含内嵌 NUL 守卫）；本机无 cargo，**未编译验证** |
-| package job 失败可见性 | `.github/workflows/build.yml` | **【2026-11-14 本轮，未推送】** 5 个可失败步骤各加 `::error::` 捕获 + job 级兜底定位；YAML 解析通过、21 个 pwsh 块语法解析 0 错误 |
-| 决策台账 D17–D20、第十三轮 | `DECISIONS.md` | — |
+| `Cargo.lock` 规范化 | `Cargo.lock` | **【已于 aa7e9b5 推送】** `libloading` 依赖改 `cfg-if` + `windows-link`、127 包按 `(name,version)` 重排、块间空行规范；tomllib 复验：有序 / 零歧义 / 零悬空引用。**第 11 次 CI 的 Test 已越过 `--locked`**（不再报锁文件漂移） |
+| Gate S7' 路径修复 | `.github/workflows/build.yml` | **【已于 aa7e9b5 推送】** 4 个参数由 `${{ env.GITHUB_WORKSPACE }}`（求值为空）改用 `$env:GITHUB_WORKSPACE` + `Join-Path`；**第 11 次 CI 的 Gate S7' = success，已由真实 CI 证实** |
+| lock 漂移自诊断（双保险） | `.github/workflows/build.yml` | **【已于 aa7e9b5 推送】** Test 失败且报错含 `--locked` 时，跑 `cargo metadata` 并把 `git diff -- Cargo.lock` 打进 annotations（第 11 次未触发该分支） |
+| 门禁空过修复（P0） | `scripts/gates/theme_contrast_check.py` | **【已于 aa7e9b5 推送】** 缺/空资产不再 `continue`，缺资产 / 0 字节 / 无 `<template>` / 零文字元素一律 FAIL；本地 4 组负控 EXIT 符合预期。顺带统一 G05 口径：先剥注释与 `<script>`，不再把注释里的说明文字当成渲染文字 |
+| smoke-probe 字符串传参修复（P0） | `crates/zsdesk-coreui/examples/probe.rs` | **【已于 aa7e9b5 推送】** `ui_page_load_string` 改传 NUL 结尾缓冲（含内嵌 NUL 守卫）；本机无 cargo，**未编译验证** |
+| package job 失败可见性 | `.github/workflows/build.yml` | **【已于 aa7e9b5 推送】** 5 个可失败步骤各加 `::error::` 捕获 + job 级兜底定位；YAML 解析通过、21 个 pwsh 块语法解析 0 错误 |
+| **Rust 模块布局修复（第 11 次 CI 真因）** | `crates/zsdesk-coreui/src/lib.rs` | **【2026-11-15 本轮，未推送】** 5 条 `mod` 声明各加 `#[path = "lib/xxx.rs"]`，消除 E0583；不搬文件以保留全仓 7 份文档的 `src/lib/*.rs` 引用。已静态核对所有 `pub use` 名字、`StartupReport` 字段与 `RevisionStamp` 变体均对得上；**本机无 cargo，类型检查只能由第 12 次 CI 回答** |
+| **S14 Rust 模块布局门禁** | `scripts/gates/rust_module_layout_check.py` + `.github/workflows/build.yml` | **【2026-11-15 本轮，未推送】** 机械复现 Rust 模块文件解析规则，接在 `cargo test` **之前**（rust job 10 → 11 步），失败原因 emit `::error::`。正常态覆盖 6 个 crate root / 127 个 `.rs` 文件 EXIT=0；负控①去掉 `#[path]` → 精确报出第 11 次 CI 的那 5 个 E0583；负控②保留 `#[path]` 抽掉 `theme.rs` → 精确点名 theme |
+| 决策台账 D17–D20、第十三 / 十四 / 十五轮 | `DECISIONS.md` | — |
 
 ---
 
-## 2. 待第 11 次 CI 复验的三件事
+## 2. 待第 12 次 CI 复验的事项
 
-> 第 9 / 10 次 CI 已把 core-ui 构建、G2、S7 全部跑绿（§2.1 关闭）；
-> 第 10 次 CI 又把另两处失败的确切根因暴露出来（§0.2）并在本地修复。
-> 本节只列**仍未验证**的项；已证实的见 §1。
+> 第 11 次 CI（run `43666238286`）已把 core-ui 构建、G2、S7、**Gate S7'** 全部跑绿；
+> 同时暴露出新的 Rust 模块布局真因（§0.3），已在本轮修复。
+> 下面各小节保留当时的分析过程；**最新状态以本表为准**：
+
+| 小节 | 第 11 次 CI 的裁决 | 现在状态 |
+|---|---|---|
+| §2.1 core-ui C++ 构建 | 第三次 success | ✅ 关闭 |
+| §2.1b `Cargo.lock` / `cargo test --locked` | Test **没有**再报 `--locked` 漂移 ⇒ 锁文件修复有效 | ✅ 该真因关闭（但 Test 因 E0583 仍失败） |
+| §2.1c Gate S7' 路径 | **Gate S7' = success** ⇒ `$env:GITHUB_WORKSPACE` 修复有效 | ✅ 关闭 |
+| §2.4 五个 S13 门禁在 CI 首次执行 | 仍被 Test 失败跳过 | ⏳ 待第 12 次 CI |
+| `cargo build` / package job / `probe.rs` 编译 | 仍被跳过 | ⏳ 待第 12 次 CI |
+| **新增：Rust 5 个模块文件首次被 rustc 编译** | 第 11 次止步于 E0583，模块内容从未编译 | ⏳ **最大未知**，待第 12 次 CI |
+
+> 本机**无 cargo / rustc** 且缺 `zsui` path 依赖 ⇒ 静态复核不能替代编译。
+> 修完 E0583 后才轮到类型 / 借用检查，第 12 次 CI 仍可能暴露下一批编译错误。
 
 ### 2.1 ✅ 已关闭：core-ui 的 C++ 构建
 
@@ -138,18 +189,22 @@ tomllib 复验：127 包 / 有序 / 零歧义引用 / 零悬空引用。
 若将来 pin 的 revision 变更导致该路径反复失败，可评估改用 VS 的 `cl.exe`，
 或过渡期直接用本机 GuoheView 的定制 DLL。**当前不需要走退路。**
 
-### 2.1b Rust job 的 `cargo test` —— 真因已定位、已修、待复验
+### 2.1b Rust job 的 `cargo test` —— `Cargo.lock` 真因 ✅ 已由第 11 次 CI 关闭
 
 第 10 次 CI 的真因是 **`Cargo.lock` 与 workspace 不同步**（详见 §0.2 真因 B），
 **不是 doctest** —— doctest 的旧 crate 名只是同一轮里顺手修掉的确定性缺陷。
 本地已把锁文件改成 cargo 规范形式：`libloading` 依赖 `cfg-if` + `windows-link`、
 127 个包按 `(name, version)` 重排、块间空行规范化，tomllib 复验通过。
-⚠️ **本机无 Rust 工具链且缺 `zsui` path 依赖 ⇒ 仍无法本地复跑 `cargo test`**：
-「锁文件是否与 cargo 的解析结果完全一致」只能由第 11 次 CI 回答。
-Test 的失败分支已加 lock 漂移自诊断（`cargo metadata` + `git diff -- Cargo.lock` → annotations）。
-**第 9 / 10 次 CI 都在这一步失败，后面的 S13 门禁与 `cargo build` 一步都没跑到** ⇒ §2.4 仍待验。
 
-### 2.1c Gate S7' 导出面门禁 —— 真因已定位、已修、待复验
+**第 11 次 CI 裁决**：Test 没有再报 `--locked` 漂移，`cargo metadata` 自诊断分支
+也未触发 ⇒ 锁文件与 workspace manifests 已一致，**本真因关闭**。
+⚠️ 但同一个 Test 步骤随后报出 5 条 E0583（§0.3），仍以 exit 1 结束；
+本机无 Rust 工具链且缺 `zsui` path 依赖 ⇒ 模块内容的编译只能由第 12 次 CI 回答。
+Test 的失败分支已加 lock 漂移自诊断（`cargo metadata` + `git diff -- Cargo.lock` → annotations）。
+**第 9 / 10 / 11 次 CI 都在 Test 这一步失败，后面的 S13 门禁与 `cargo build` 一步都没跑到**
+（第 9/10 次真因 = 锁文件，第 11 次真因 = E0583 模块布局）⇒ §2.4 仍待验。
+
+### 2.1c Gate S7' 导出面门禁 —— ✅ 已由第 11 次 CI 关闭
 
 第 10 次 CI 的真因是 **`${{ env.GITHUB_WORKSPACE }}` 求值为空**（详见 §0.2 真因 A），
 **不是** Python 3.9 兼容问题 —— 昨天写在 §0.1 里的推定**已被证伪**，此处更正。
@@ -158,9 +213,9 @@ Test 的失败分支已加 lock 漂移自诊断（`cargo metadata` + `git diff -
 但它们不是本次失败的原因；**真正让问题浮出水面的是第 3 层 `::error::` 探针** ——
 没有它，这个错误至今仍不可见。
 
-**待验**：第 11 次 CI 里 S7' 能否拿到真实 DLL 并完成导出面比对。
-本机用 346 DLL 对 345 源码验证通过；CI 编出的 345 DLL 是否与源码 `UI_API` 定义集
-完全一致，**仍未实测**。若报缺符号/多符号，那是需要判断的真实差异，不是误报。
+**第 11 次 CI 裁决：Gate S7' = success** —— 四个 `Join-Path $ws ...` 参数都拿到了
+CI 里的真实路径，导出面比对完成并通过。本机此前用 346 DLL 对 345 源码验证通过的
+结论，现已在 CI 编出的 345 DLL 上**实测确认**。本项关闭。
 
 ### 2.2 package job 的 zsui 检出（仍未实测）
 

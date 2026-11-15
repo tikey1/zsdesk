@@ -987,6 +987,35 @@ $PSNativeCommandUseErrorActionPreference = $false
   - **交付基础设施**：`docs/ci.md` §2 / §6 对齐第 9 / 10 次 CI 实况并补记 smoke-probe 两步；
     `packaging/windows/zsdesk.iss:38` 的 `manifest.json` → `manifest.sha256`（与打包产物一致）；
     `spec/ci-contract.md` 消除三处自相矛盾的状态标记（第 31 / 34 条、§4.7 表格）。
-  - **仍未验证 / 未推送**：以上全部**尚未 commit、尚未 push**；`cargo test --locked`、
+  - **当时状态（历史快照）**：以上全部**尚未 commit、尚未 push**；`cargo test --locked`、
     五个 S13 门禁、`cargo build`、Gate S7' 对 CI 内 DLL 的比对、`package` job 的首次执行，
     均待第 11 次 CI 回答。
+    → **后续已变**：这批改动于 2026-11-15 以 commit `aa7e9b5` 推送，第 11 次 CI
+    （run `43666238286`）已跑，见下方第十五轮。勿再按本条判断当前状态。
+- 2026-11-15 **第十五轮（第 11 次 CI 结果回写 + Rust 模块布局修复）**：本轮**无新增用户决策**，
+  不占用 D 编号；仅记 CI 裁决与已落盘的修复。
+  - **第 11 次 CI 裁决**：commit `aa7e9b5`，run `43666238286`。
+    · core-ui job **全绿**，含 **Gate S7' = success** ⇒ 第十四轮 D23 附带修的
+      `$env:GITHUB_WORKSPACE` + `Join-Path` 路径**经真实 CI 证实有效**，
+      S7' 的 CI 内 DLL 导出面比对首次通过。
+    · rust job 的 Test **没有**再报 `--locked` 漂移 ⇒ `Cargo.lock` 规范化有效，
+      「锁文件与 workspace 不同步」这个真因**关闭**。
+    · 但 Test 仍以 exit 1 失败，公开 annotations 给出 5 条
+      `error[E0583]: file not found for module`（`api` / `loader` / `theme` /
+      `ui_thread` / `version`）。package job 第三次 skipped。
+  - **真因 D —— Rust 模块布局（新）**：`crates/zsdesk-coreui/src/lib.rs` 是 crate root，
+    5 条裸 `pub mod xxx;`；模块文件却在 `src/lib/*.rs`。Rust 2018+ 默认只查
+    `src/X.rs` / `src/X/mod.rs`，**不会进 `src/lib/`**。本机无 cargo/rustc，
+    且前 10 次 CI 都在更早环节失败 ⇒ 这批 `.rs` **从未被编译过**，
+    tree-sitter 语法级静态复核抓不到布局错。**「语法过了」≠「能编译」**。
+  - **修法**：不搬文件（全仓 7 份文档按 `src/lib/*.rs` 引用，搬了会让文档路径集体失真），
+    改在 5 条 `mod` 声明前加 `#[path = "lib/xxx.rs"]` 显式钉住映射。
+  - **新增机械门禁 S14**（D18 / D23 的延续）：`scripts/gates/rust_module_layout_check.py`
+    机械复现 Rust 的模块文件解析规则（含 `#[path]`、内联模块、mod-rs / non-mod-rs 差异），
+    接进 `build.yml` 的 **`cargo test` 之前**（rust job 10 → 11 步），失败原因 emit `::error::`。
+    本地正常态覆盖 6 crate root / 127 个 `.rs`；负控①去掉 `#[path]` → 精确复现第 11 次 CI
+    的 5 条 E0583，负控②保留 `#[path]` 抽掉 `theme.rs` → 精确点名 theme。
+    **规则**：编译前能机械发现的问题，不许再浪费一整轮 CI。
+  - **仍未验证 / 未推送**：以上修复**尚未 commit、尚未 push**。`zsdesk-coreui` 5 个模块
+    首次被 rustc 编译可能暴露下一批类型 / 借用错误；五个 S13 + 新 S14 门禁、
+    `cargo build`、package job 首次产出 ZIP、`probe.rs` 首次编译，均待第 12 次 CI 回答。

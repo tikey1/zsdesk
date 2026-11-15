@@ -40,10 +40,22 @@
 
 #![deny(missing_debug_implementations)]
 
+// 模块文件刻意放在 `src/lib/` 下（全仓 7 份文档按这个路径引用），但 crate root
+// 是 `src/lib.rs`。Rust 2018+ 默认只为 `mod X;` 查找 `src/X.rs` 或
+// `src/X/mod.rs`，**不会**进 `src/lib/` —— 第 11 次 CI 的 5 个
+// `error[E0583]: file not found for module ...` 就是这么来的。
+// 用 `#[path]` 显式钉住布局，而不是搬动 5 个文件让文档路径集体失真。
+// `#[path]` 不在内联模块块内时，相对的是本文件所在目录（`src/`）。
+// 门禁 `scripts/gates/rust_module_layout_check.py` 会机械复核这份映射。
+#[path = "lib/api.rs"]
 pub mod api;
+#[path = "lib/loader.rs"]
 pub mod loader;
+#[path = "lib/theme.rs"]
 pub mod theme;
+#[path = "lib/ui_thread.rs"]
 pub mod ui_thread;
+#[path = "lib/version.rs"]
 pub mod version;
 
 pub use api::{

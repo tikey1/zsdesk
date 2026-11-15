@@ -52,6 +52,29 @@ jobs:
         with:
           python-version: '3.11'
 
+      # ★ 必须在 cargo test **之前**：本机无 cargo/rustc 时，`mod X;` 与磁盘
+      # 布局不一致不会有任何静态提示，只会在 CI 里以 E0583 爆出来。
+      # 第 11 次 CI 就是 zsdesk-coreui 的 5 个模块全部 file not found，
+      # Test 一失败，后面的门禁 / build / package 全被连带跳过。
+      # 该门禁机械复核「mod 声明 → 文件」映射，让编译前就能发现的问题
+      # 不再浪费一整轮 CI。失败原因同样 emit 成公开 annotation（D23）。
+      - name: Gate S14 — Rust module layout (pre-compile)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $gate = Join-Path $env:GITHUB_WORKSPACE 'app\scripts\gates\rust_module_layout_check.py'
+          $out = & python $gate --root (Join-Path $env:GITHUB_WORKSPACE 'app') 2>&1
+          $code = $LASTEXITCODE
+          $out | ForEach-Object { Write-Host $_ }
+          if ($code -ne 0) {
+            $out | Select-Object -Last 20 | ForEach-Object {
+              $line = ([string]$_).Trim()
+              if ($line) { Write-Host "::error title=gate S14::$line" }
+            }
+            exit $code
+          }
+
       # ★ 失败必须【看得见】。job 日志的下载端点需要 admin 权限，外部读者
       # 只能通过 check-run annotations 看到结论 ⇒ 失败时把关键行打成
       # `::error::` annotation，否则失败原因对外完全不可见。

@@ -38,15 +38,16 @@ core-ui  ──┘
 
 ## 2. 步骤明细
 
-> 验证状态以 **run `43545192012`（第 10 次 CI，commit `1a00121`）** 为准；
-> 「已实跑」= 在真实 CI 执行过，**不等同于通过**。第 11 次 CI 尚未触发，标 ⏳ 的都还没有真实结论。
+> 验证状态以 **run `43666238286`（第 11 次 CI，commit `aa7e9b5`）** 为准；
+> 「已实跑」= 在真实 CI 执行过，**不等同于通过**。标 ⏳ 的仍无真实结论。
 
-### job `rust`（10 步）
+### job `rust`（11 步）
 | 步骤 | 作用 | 验证状态 |
 |---|---|---|
 | checkout → `path: app` + 读 pin + checkout `zsui` → `path: zsui` | 满足 `../../../zsui` path 依赖（MPL-2.0） | ✅ 已实跑 |
 | `setup-python@v5`（3.11）+ `dtolnay/rust-toolchain@1.99.0` | 钉版本（D22） | ✅ 已实跑 |
-| `cargo test --workspace --release --locked` | 全量测试 | ❌ **第 9 / 10 次 CI 均失败**；真因 = `Cargo.lock` 手工拼接不合规，本地已修，**待第 11 次 CI 复验** |
+| **Gate S14 — Rust module layout (pre-compile)** | 编译前机械复核 `mod` 声明 → 文件映射，提前拦 `error[E0583]` | 🆕 2026-11-15 新增、**未经 CI 验证**；本地正常态覆盖 6 crate root / 127 文件，两组负控精确命中 |
+| `cargo test --workspace --release --locked` | 全量测试 | ❌ **第 9 / 10 / 11 次均失败**：第 9/10 次真因 = `Cargo.lock` 不同步（第 11 次已越过、`--locked` 不再报错）；**第 11 次真因 = `zsdesk-coreui` 5 个模块 `error[E0583]`**，已加 `#[path]` 修复，**待第 12 次 CI** |
 | Gate S13（5 个门禁） | 标签 / token 命名空间 / id 清单 / 对比度 / 间距 | ⏳ **从未跑到**（Test 失败即跳过后续） |
 | `cargo build --locked --release -p zsdesk-app` | 构建 full | ⏳ 从未跑到 |
 | `cargo clippy` | 静态检查，**不阻断** | ⏳ 从未跑到 |
@@ -152,21 +153,24 @@ CI 上的雷点：① `GIT_SHALLOW` + tag 的浅克隆；② quickjs 的子模�
 
 ## 6. 已验证 / 未验证分界
 
-> 以第 10 次 CI（run `43545192012`）为止的实测为准；**第 11 次 CI 尚未触发**。
+> 以第 11 次 CI（run `43666238286`，commit `aa7e9b5`）为止的实测为准；
+> **第 12 次 CI 尚未触发**。
 
 | 环节 | 状态 | 证据 |
 |---|---|---|
 | fork 的基线 CI（commit `4a48349`，`Windows build #1`，9m58s） | ✅ 通过 | **上游基线**，尚未接入 core-ui；不代表当前项目 |
-| checkout / 工具链 / `zsui` 同级检出 | ✅ 已实跑 | run `43398079661` / `43545192012` |
+| checkout / 工具链 / `zsui` 同级检出 | ✅ 已实跑 | run `43398079661` / `43545192012` / `43666238286` |
 | clang-cl + llvm-rc + Ninja + QuickJS-NG 预置 | ✅ 已实跑成功 | 同上 |
-| **core-ui 从源码构建** | ✅ **第 9 / 10 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
+| **core-ui 从源码构建** | ✅ **第 9 / 10 / 11 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
 | `core-ui.dll` 的 x64 断言 / Gate G2 / Gate S7 | ✅ 三次全绿 | 同上 |
-| `cargo test --workspace --release --locked` | ❌ **两次失败** | 真因 = `Cargo.lock` 手工拼接不合规；本地已修，**待第 11 次 CI** |
-| 五个 S13 门禁 / `cargo build` / clippy | ⏳ **从未在 CI 跑到** | Test 失败即跳过后续步骤 |
-| Gate S7' 对 CI 内 DLL 的导出面比对 | ❌ 两次失败 | 真因 = `env.GITHUB_WORKSPACE` 表达式求值为空；本地已修，**待复验** |
-| Gate S12 / 收 CRT / smoke-probe / 便携 ZIP / `manifest.sha256` / 上传 | ⏳ **从未真正执行** | package job 两次均被上游失败连带 skipped |
+| **Gate S7' 对 CI 内 DLL 的导出面比对** | ✅ **第 11 次 CI = success** | `$env:GITHUB_WORKSPACE` + `Join-Path` 修复经真实 CI 证实；本机 346 DLL 的结论已在 CI 编出的 345 DLL 上实测确认 |
+| `Cargo.lock` 与 workspace 一致性 | ✅ **第 11 次 CI 越过 `--locked`** | Test 未再报锁文件漂移，`cargo metadata` 自诊断分支也未触发 |
+| `cargo test --workspace --release --locked` | ❌ **三次失败** | 第 9/10 次 = 锁文件（已关闭）；**第 11 次 = `zsdesk-coreui` 5 个 `mod` 声明 E0583**，已加 `#[path]` 修复，**待第 12 次 CI** |
+| `zsdesk-coreui` 5 个模块文件的编译 | ⏳ **从未被 rustc 编译** | 前 11 次 CI 都在更早环节失败；修完 E0583 后才轮到类型 / 借用检查 |
+| 五个 S13 门禁 / 新 S14 门禁 / `cargo build` / clippy | ⏳ **从未在 CI 跑到** | Test 失败即跳过后续步骤 |
+| Gate S12 / 收 CRT / smoke-probe / 便携 ZIP / `manifest.sha256` / 上传 | ⏳ **从未真正执行** | package job 三次均被上游失败连带 skipped |
 | `probe.rs` 的类型检查 / 借用检查 / 实际运行 | ⏳ **从未编译** | 本机无 cargo/rustc，只能由 CI 回答 |
-| 失败原因的公开可见性（D23） | ✅ 第 10 次 CI 已证明有效 | `::error::` annotations 一次定位两个真因；package job 补齐于 2026-11-14，**未经 CI 验证** |
+| 失败原因的公开可见性（D23） | ✅ 第 10 / 11 次 CI 已证明有效 | `::error::` annotations 先后定位「两个真因」与「5 条 E0583」；package job 的补齐仍**未经 CI 验证** |
 
 ---
 
