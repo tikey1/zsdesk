@@ -97,7 +97,7 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 | **D09** | 链接 = **运行时 `LoadLibrary`**（不链 `core-ui.lib`） | 已定 | 显式限定搜索路径 | 失去编译期类型检查 |
 | **D10** | 主题 = **库接管**，Rust 调 `ui_theme_set_mode` | 已定 | 16 个 token 改名 `--app-*`；accent 走库 token + `ui_theme_set_accent_hex` | 无运行时 CSS 变量 API → 页面用 `ui_page_load_string` 注入 `:root`（**必须在 `<style>` 块内**，否则整页失败；且必须是源码里**第一个** `:root` —— core-ui 自定义属性**先定义者赢**）；切明暗须**重建页面** |
 | **D11** | 目录结构 + 迁移矩阵 + 里程碑落地 | 已定 | **保留上游 5 个 crate 名 + 新增 `zsdesk-coreui`**；138 文件四档；M0~M3 | 约 5,900–10,600 行新增 [估算] |
-| **D12** | `.uix` 资产契约 + 自绘挂载选型 | 已定 | 选 **(b) `.uix` 里声明 `<custom>`**（静态声明，id = `list_host`）；`<window>` 必须自闭合；文字用元素内文本节点；根样式用 `.root` class；**布局分隔线用 1px `<div class="sep"/>`**；**宿主标签按「是否 Rust 自绘」判定**（`nav_host`→`<custom>`、`breadcrumb`→`<label>`、`preview_host`→`<div>`+`<custom id="preview_image">` 子宿主 + 4 个 `<label class="preview-meta">`）；**页面重建后 32 个句柄 + 挂载钩子必须全部重取/重注册** | `.uix` 资产需多一次机械评审；根 `<div>` 要显式加 `class="root"`；切主题必须重建页面 + 重取句柄（漏一个 = 写野内存） |
+| **D12** | `.uix` 资产契约 + 自绘挂载选型 | 已定 | 选 **(b) `.uix` 里声明 `<custom>`**（静态声明，id = `list_host`）；`<window>` 必须自闭合；文字用元素内文本节点；根样式用 `.root` class；**布局分隔线用 1px `<div class="sep"/>`**；**宿主标签按「是否 Rust 自绘」判定**（`nav_host`→`<custom>`、`breadcrumb`→`<label>`、`preview_host`→`<div>`+`<custom id="preview_image">` 子宿主 + 4 个 `<label class="preview-meta">`）；**页面重建后 32 个句柄 + 挂载钩子必须全部重取/重注册** | `.uix` 资产需多一次机械评审；根 `<div>` 要显式加 `class="root"`；切主题必须重建页面 + 重取句柄（漏一个 = 该控件静默不刷新，不崩溃也不报错） |
 | **D13** | 无障碍与窗口材质 → **接受降级并记录** | 已定 | core-ui 无 UIA / 无系统色感知 / 无 Mica 入口 → **高对比度、读屏、Mica/Acrylic 全部不可实现** | 三项能力缺失，**必须**写进 `DELIVERY.md` 与 `README-FORK.md`；上游补 UIA 时复评 |
 | **D14** | 品牌色 → **Rust 侧读系统 `AccentColor`** | 已定 | 读注册表 `HKCU\...\Explorer\AccentColor`（**BGR 序**）→ `#RRGGBB` → `ui_theme_set_accent_hex()` → 库 token `--accent`；读不到回退 `themes.json` 的 `--app-accent` | Rust 侧多一处注册表读取；BGR 写反会变橙色系；切模式后必须重读重调 |
 | **D15** | `.uix` 通道与深浅色的**五条契约口径**（F1~F5） | 已定 | F1 `:root` 注入 / F2 切主题必须重建页面 / F3 重建后 32 个句柄全失效 / F4 字体不触发重建 / F5 accent 跨模式保留 → 切主题要**重读重调** | ⚠️ **F1 的「注入位置」已被 D20 取代**（first-wins 下放块尾仍会被页面自己的 `:root` 抢先）；F1 其余部分有效 |
@@ -267,7 +267,7 @@ zsdesk-app ──► zsdesk-ui ──► zsdesk-coreui
 | 6 | `GuoheView.exe` 的命令行参数形式未核实 | M2 第一步：真机 `ShellExecuteW` 传路径，观察是否正确打开；不认则走「exe + 参数」兜底并记录实际形式 |
 | 7 | `zsdesk-app/src/desktop/host.rs`（2,681 行）是最大单文件 | M3 才碰；M0~M2 不动它 |
 | 9 | **`:root` 注入被 `.uix` 自带的 `:root` 抢先 → 静默失效** | core-ui 的自定义属性是**先定义者赢**（`LookupVar` 返回**第一个**命中；`:root` 规则被整条跳过 → 根本不参与 CSS 级联）→ 注入若排在 `.uix` 的 `:root` 之后 → **`.uix` 的值赢** → Rust 的注入被**静默忽略** → 症状「切主题颜色不变」，**零报错** | 注入块插在**源码最前面**；Rust 自检加**顺序断言**（+ 位置/内容/键集共四条）→ M1 的 V1.12 覆盖「`.uix` 自带 `:root` 抢先」这个坏情形 |
-| 8 | **切主题后 32 个句柄失效 → 写野内存** | `ui_page_load_string` 返回新 page，旧控件被销毁；旧句柄继续用 = **静默崩溃 / 花屏，不会报「句柄无效」**。`ui_page_reload` 也重编译（重放旧源码），**同样失效** | M1 的 V1.13：切一次主题 → 状态栏 / 列表 / 预览 / 面包屑**四处都动**；代码里把句柄表收敛到**一个**结构（`page_ctx.rs`），重建走**唯一一条路径**（`spec/ffi-core-ui.md` §4.6） |
+| 8 | **切主题后 32 个句柄失效 → 静默不刷新** | `ui_page_load_string` 返回新 page，旧控件脱离控件树但对象仍存活（句柄表强引用）；旧句柄继续写属性 = **静默无效，不崩溃、不报错、界面只是不刷新**。`ui_page_reload` 也重编译（重放旧源码），**同样失效**。机制见 `docs/14-QA-UIX-REVIEW.md` §15.3 O-2 | M1 的 V1.13：切一次主题 → 状态栏 / 列表 / 预览 / 面包屑**四处都动**；代码里把句柄表收敛到**一个**结构（`page_ctx.rs`），重建走**唯一一条路径**（`spec/ffi-core-ui.md` §4.6） |
 
 ---
 
@@ -340,7 +340,7 @@ pwsh scripts/check-coreui-dll.ps1 -DllPath stage/core-ui.dll -RequireBesideExe s
 
 | 文件 | 内容 |
 |---|---|
-| `DECISIONS.md` | 决策台账（D00–D11 + C1~C5 判定） |
+| `DECISIONS.md` | 决策台账（D00~D23 + C1~C5 判定 + T1~T8） |
 | `PROJECT_STATE.md` | 项目状态与下一步 |
 | `research/facts.md` | 事实核对底稿（10 组实测） |
 | `docs/05-COREUI-EXPORTS.txt` | 本机 core-ui.dll 的 2006 个导出（**绑定清单权威来源**） |

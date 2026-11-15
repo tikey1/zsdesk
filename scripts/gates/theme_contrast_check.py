@@ -4,6 +4,7 @@
 主题 token 门禁：双主题对比度（G05）+ 间距刻度（G13）。
 
 对比度**按真实渲染关系计算**，不验 UI 里不存在的组合：
+  · 先剥掉 HTML 注释 / CSS 注释 / <script> —— 注释里的说明文字不是渲染文字
   · 解析三个 .uix 的 <template>，得到元素树（标签 / class / 文本）
   · 解析 <style>，得到 class → 声明
   · 对每个**有文字**的元素：
@@ -12,6 +13,11 @@
       背景 = 最近祖先-or-self 的 background / background-color；
               没有 → 库默认窗口底
   · var(--app-*) 按 themes.json 的 light/dark 取值
+
+**门禁有效性前提（不得删）**：资产缺失 / 0 字节 / 剥噪后无内容 / 解析不到
+非空 <template> / 某主题下全项目零文字元素，一律 FAIL。绝不能用 `continue`
+把缺失资产跳过——否则「没有可判对象」会被当成「全部达标」而打印 PASS。
+历史上这里正是靠 `if not path.exists(): continue` 静默空过（P0）。
 
 依据：
   references/10-standards/mechanical-gates.md G05 / G13
@@ -68,6 +74,41 @@ def strip_noise(src: str) -> str:
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.S)
     src = re.sub(r"<script>.*?</script>", "", src, flags=re.S)
     return src
+
+
+def load_asset_sources(root: Path, fails: list) -> dict:
+    """统一读取并校验三个 .uix，返回 {rel: 剥噪后源码}。
+
+    任何一处资产不可用都写入 fails，而不是跳过。返回 dict 可能少于 3 项，
+    调用方仍会继续跑完剩余资产以便一次报全，但最终结论必为 FAIL。
+    """
+    sources = {}
+    for rel in ASSETS:
+        path = root / rel
+        if not path.exists():
+            fails.append(f"{rel}: 资产缺失 —— 门禁拒绝空过（缺资产无法证明对比度/间距）")
+            continue
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeError) as exc:
+            fails.append(f"{rel}: 资产读取/解码失败 —— 门禁拒绝空过（{exc}）")
+            continue
+        if not raw.strip():
+            fails.append(f"{rel}: 资产为空（0 字节或纯空白）—— 门禁拒绝空过")
+            continue
+        src = strip_noise(raw)
+        if not src.strip():
+            fails.append(f"{rel}: 剥除注释/脚本后无有效内容 —— 门禁拒绝空过")
+            continue
+        tm = re.search(r"<template[^>]*>(.*?)</template>", src, flags=re.S)
+        if not tm or not tm.group(1).strip():
+            fails.append(f"{rel}: 解析不到非空 <template> 模板体 —— 门禁拒绝空过")
+            continue
+        if not parse_template(src):
+            fails.append(f"{rel}: <template> 内没有任何元素节点 —— 门禁拒绝空过")
+            continue
+        sources[rel] = src
+    return sources
 
 
 def parse_style(src: str) -> dict:
@@ -133,7 +174,7 @@ def resolve_color(value: str, theme: dict, mode: str) -> str | None:
 
 
 def element_pairs(tree: list, rules: dict, theme: dict, mode: str):
-    """产出 (元素描述, 前景色, 背景色)。"""
+    """产出 (元素描述, 前景色, 背景色, 文本)。"""
     out = []
 
     def walk(el, inherited_bg):
@@ -168,21 +209,23 @@ def element_pairs(tree: list, rules: dict, theme: dict, mode: str):
     return out
 
 
-def check_spacing(root: Path) -> list[str]:
-    """G13：padding / margin / gap 的取值必须落在刻度上。"""
+def check_spacing(sources: dict) -> list[str]:
+    """G13：padding / margin / gap 的取值必须落在刻度上。
+
+    sources 由 load_asset_sources 产出；缺资产已在那里判 FAIL，这里不再 continue。
+    """
     fails: list[str] = []
     pattern = re.compile(r"\b(padding|margin|gap)(-[a-z]+)?\s*:\s*([^;}]+)")
-    for rel in ASSETS:
-        path = root / rel
-        if not path.exists():
-            continue
-        src = strip_noise(path.read_text(encoding="utf-8"))
+    for rel, src in sources.items():
         for lineno, line in enumerate(src.splitlines(), 1):
             for m in pattern.finditer(line):
                 for token in m.group(3).split():
                     if not token.endswith("px"):
                         continue
-                    value = int(token[:-2])
+                    try:
+                        value = int(token[:-2])
+                    except ValueError:
+                        continue
                     if value not in SPACE_SCALE:
                         fails.append(
                             f"{rel}:{lineno}: 间距 {token} 不在刻度 "
@@ -204,18 +247,16 @@ def main() -> int:
     data = json.loads(theme_path.read_text(encoding="utf-8"))
 
     fails: list[str] = []
-    print("=== G05 双主题对比度（按 .uix 真实渲染关系计算）===")
+    sources = load_asset_sources(root, fails)
+
+    print("=== G05 双主题对比度（按 .uix 真实渲染关系计算，已剥注释/脚本）===")
     for mode in ("light", "dark"):
-        if mode not in data:
-            fails.append(f"themes.json 缺 {mode} 段")
+        theme = data.get(mode)
+        if not isinstance(theme, dict) or not theme:
+            fails.append(f"themes.json 缺 {mode} 段或该段为空 —— 门禁拒绝空过")
             continue
-        theme = data[mode]
         all_pairs = []
-        for rel in ASSETS:
-            path = root / rel
-            if not path.exists():
-                continue
-            src = path.read_text(encoding="utf-8")
+        for rel, src in sources.items():
             rules = parse_style(src)
             tree = parse_template(src)
             for desc, fg, bg, text in element_pairs(tree, rules, theme, mode):
@@ -226,6 +267,12 @@ def main() -> int:
                         f"[{mode}] {rel} {desc}: {fg} on {bg} = {ratio:.2f}:1 "
                         f"< {MIN_CONTRAST}:1 （文本「{text}」）"
                     )
+        if not all_pairs:
+            # 空集不能判「全部达标」——这是本门禁最容易被绕过的地方。
+            fails.append(f"[{mode}] 真实文字元素 0 处 —— 门禁拒绝空过"
+                         f"（没有可判对象不等于全部达标）")
+            print(f"  [{mode}] 真实文字元素 0 处（已判 FAIL）")
+            continue
         all_pairs.sort(key=lambda x: x[4])
         print(f"  [{mode}] 真实文字元素 {len(all_pairs)} 处，最低 "
               f"{all_pairs[0][4]:.2f}:1（{all_pairs[0][1]} "
@@ -234,9 +281,9 @@ def main() -> int:
             print(f"        {rel} {desc}: {fg} on {bg} = {ratio:.2f}:1 「{text}」")
 
     print("\n=== G13 间距刻度 ===")
-    spacing_fails = check_spacing(root)
+    spacing_fails = check_spacing(sources)
     fails += spacing_fails
-    print(f"  非刻度间距：{len(spacing_fails)} 处")
+    print(f"  已检资产 {len(sources)}/{len(ASSETS)} 个，非刻度间距：{len(spacing_fails)} 处")
 
     print()
     if fails:

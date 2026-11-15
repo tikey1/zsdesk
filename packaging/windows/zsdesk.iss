@@ -35,7 +35,9 @@
 #define ProductMutex "Local\ZSDesk.Native.Application"
 #define ProductModelId "ZSDesk.Native"
 #endif
-#if !FileExists(SourceDir + "\ZSDesk.exe") || !FileExists(SourceDir + "\manifest.json")
+; 便携 ZIP 的清单文件名是 manifest.sha256（见 .github/workflows/build.yml 的打包步骤），
+; 不是 manifest.json —— 上游遗留的 manifest.json 会让 Inno Setup 在编译期直接 #error。
+#if !FileExists(SourceDir + "\ZSDesk.exe") || !FileExists(SourceDir + "\manifest.sha256")
 #error The executable or verified package manifest is missing
 #endif
 

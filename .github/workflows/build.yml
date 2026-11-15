@@ -69,6 +69,16 @@ jobs:
               Select-String -Pattern 'error\[|error:|FAILED|panicked|test result: FAILED|failures:' |
               Select-Object -First 25 |
               ForEach-Object { Write-Host ("::error title=cargo test::" + $_.Line.Trim()) }
+            # 锁文件漂移自诊断：本机无 cargo。若 Cargo.lock 仍与 manifests 不同步，
+            # 让 CI 用 cargo 重写一次并把 diff 回传，便于把准确结果落回仓库。
+            if (Select-String -Path test-output.txt -Pattern 'cannot update the lock file|--locked' -Quiet) {
+              cargo metadata --format-version 1 > $null 2>&1
+              Write-Host '::error title=Cargo.lock drift::下面是 cargo 期望的锁文件改动：'
+              git diff -- Cargo.lock | Select-Object -First 80 | ForEach-Object {
+                $line = ([string]$_).Trim()
+                if ($line) { Write-Host ("::error title=Cargo.lock drift::" + $line) }
+              }
+            }
             exit $code
           }
           Write-Host 'cargo test passed.'
@@ -417,11 +427,16 @@ jobs:
         run: |
           $ErrorActionPreference = 'Continue'
           $PSNativeCommandUseErrorActionPreference = $false
+          # ★ GITHUB_WORKSPACE 是 shell 环境变量，不是 `env` 上下文的键：
+          # `${{ env.GITHUB_WORKSPACE }}` 求值为空 ⇒ 拼出 "\core-ui\..." 这种
+          # 没有盘符的路径 ⇒ S7' 报 "core-ui.dll not found"（第 9/10 次 CI 真因）。
+          # 其余步骤用的是 PowerShell 的 $env:GITHUB_WORKSPACE，一直是对的。
+          $ws = $env:GITHUB_WORKSPACE
           $out = & python app/scripts/gates/coreui_export_gate.py `
-            --dll "${{ env.GITHUB_WORKSPACE }}\core-ui\clang-cl-build\core-ui.dll" `
-            --source-dir "${{ env.GITHUB_WORKSPACE }}\core-ui\src" `
-            --include-dir "${{ env.GITHUB_WORKSPACE }}\core-ui\include" `
-            --doc "${{ env.GITHUB_WORKSPACE }}\app\docs\05-COREUI-EXPORTS.txt" 2>&1
+            --dll (Join-Path $ws 'core-ui\clang-cl-build\core-ui.dll') `
+            --source-dir (Join-Path $ws 'core-ui\src') `
+            --include-dir (Join-Path $ws 'core-ui\include') `
+            --doc (Join-Path $ws 'app\docs\05-COREUI-EXPORTS.txt') 2>&1
           $code = $LASTEXITCODE
           $out | ForEach-Object { Write-Host $_ }
           if ($code -ne 0) {
@@ -491,18 +506,29 @@ jobs:
 
       # 门禁 S12：core-ui.dll 必须与 exe 同目录，否则运行时可能命中 PATH 里的其它副本
       - name: Gate S12 — core-ui.dll must sit next to the executable
+        id: gate_s12
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          try {
           $exe = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\zsdesk-app.exe'
           $dll = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll'
           if (-not (Test-Path -LiteralPath $exe)) { throw "executable not found at $exe" }
           if (-not (Test-Path -LiteralPath $dll)) { throw "core-ui.dll not found at $dll" }
           Write-Host 'Gate S12 passed: core-ui.dll is next to the executable.'
+          } catch {
+            Write-Host ("::error title=package/Gate S12::" + $_.Exception.Message)
+            exit 1
+          }
 
       - name: Collect the Visual C++ x64 Redistributable
         id: crt
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          try {
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
           if (-not (Test-Path -LiteralPath $vswhere)) { throw "vswhere.exe not found at $vswhere" }
           $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
@@ -524,6 +550,10 @@ jobs:
           }
           "dir=$crtDir" >> $env:GITHUB_OUTPUT
           Write-Host "CRT dir: $crtDir"
+          } catch {
+            Write-Host ("::error title=package/Collect CRT::" + $_.Exception.Message)
+            exit 1
+          }
 
       # 冒烟探针：先 cargo build（同时由 crates/zsdesk-coreui/build.rs 产出 revision 戳记
       # 到 target/release/），再用【真实构建产物】+【仓库里的真实 .uix 资产】跑 U01~U03 最小闭环：
@@ -532,23 +562,52 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.0
 
       - name: Build the core-ui smoke probe
-        working-directory: app
-        run: cargo build --release --locked -p zsdesk-coreui --example probe
-
-      - name: Smoke-probe the built core-ui.dll against the real .uix assets
+        id: build_probe
         working-directory: app
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          try {
+          cargo build --release --locked -p zsdesk-coreui --example probe 2>&1 | Tee-Object -FilePath probe-build.txt
+          if ($LASTEXITCODE) { throw "cargo build (probe) 退出码 $LASTEXITCODE" }
+          } catch {
+            Write-Host ("::error title=package/Build probe::" + $_.Exception.Message)
+            Get-Content -LiteralPath probe-build.txt -ErrorAction SilentlyContinue |
+              Select-String -Pattern 'error\[|error:|FAILED' | Select-Object -Last 15 |
+              ForEach-Object { Write-Host ("::error title=package/Build probe::" + $_.Line.Trim()) }
+            exit 1
+          }
+
+      - name: Smoke-probe the built core-ui.dll against the real .uix assets
+        id: smoke_probe
+        working-directory: app
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          try {
           $dll = Join-Path $env:GITHUB_WORKSPACE 'app\target\release\core-ui.dll'
           $uix = Join-Path $env:GITHUB_WORKSPACE 'app\assets\main.uix'
           if (-not (Test-Path -LiteralPath $dll)) { throw "core-ui.dll not found at $dll" }
           if (-not (Test-Path -LiteralPath $uix)) { throw "main.uix not found at $uix" }
-          cargo run --release --locked -p zsdesk-coreui --example probe -- --dll $dll --uix $uix --id list_host
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo run --release --locked -p zsdesk-coreui --example probe -- --dll $dll --uix $uix --id list_host 2>&1 | Tee-Object -FilePath probe-run.txt
+          if ($LASTEXITCODE) { throw "smoke probe 退出码 $LASTEXITCODE（详见 probe-run.txt）" }
+          } catch {
+            Write-Host ("::error title=package/Smoke probe::" + $_.Exception.Message)
+            Get-Content -LiteralPath probe-run.txt -ErrorAction SilentlyContinue |
+              Select-Object -Last 20 |
+              ForEach-Object { Write-Host ("::error title=package/Smoke probe::" + ([string]$_).Trim()) }
+            exit 1
+          }
 
       - name: Package the portable x64 zip
+        id: zip
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
+          $PSNativeCommandUseErrorActionPreference = $false
+          try {
           $version = ([regex]::Match((Get-Content -LiteralPath 'app/Cargo.toml' -Raw), '(?m)^version\s*=\s*"([^"]+)"')).Groups[1].Value
           $stage  = Join-Path $env:GITHUB_WORKSPACE "stage/ZSDesk-$version-full-x64"
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
@@ -623,6 +682,10 @@ jobs:
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip -CompressionLevel Optimal
           Write-Host "package: $zip"
           Get-Item -LiteralPath $zip | ForEach-Object { Write-Host ("size: {0} bytes" -f $_.Length) }
+          } catch {
+            Write-Host ("::error title=package/Package zip::" + $_.Exception.Message)
+            exit 1
+          }
 
       - name: Upload the portable package
         uses: actions/upload-artifact@v4
@@ -630,3 +693,29 @@ jobs:
           name: ZSDesk-full-x64
           path: ZSDesk-*-full-x64.zip
           if-no-files-found: error
+
+      # D23：job 日志下载端点需 admin（实测 403），外部唯一可读的是 check-run annotations。
+      # 上面 5 个 pwsh 步骤各自把失败原因 emit 成 ::error::；这里再兜一层，
+      # 让「失败发生在 actions/* 步骤（checkout / download / upload）」时也能定位到具体一步。
+      - name: Package job failure locator (public annotation)
+        if: failure()
+        shell: pwsh
+        run: |
+          $outcomes = [ordered]@{
+            'Read pinned ZSUI revision' = '${{ steps.zsui.outcome }}'
+            'Gate S12'                  = '${{ steps.gate_s12.outcome }}'
+            'Collect CRT'               = '${{ steps.crt.outcome }}'
+            'Build smoke probe'         = '${{ steps.build_probe.outcome }}'
+            'Smoke probe'               = '${{ steps.smoke_probe.outcome }}'
+            'Package portable zip'      = '${{ steps.zip.outcome }}'
+          }
+          $hit = $false
+          foreach ($k in $outcomes.Keys) {
+            if ($outcomes[$k] -eq 'failure') {
+              $hit = $true
+              Write-Host "::error title=package job::$k FAILED — 具体原因见该步骤的 ::error:: annotation"
+            }
+          }
+          if (-not $hit) {
+            Write-Host '::error title=package job::package job 失败，但没有 pwsh 步骤被标记为 failure —— 失败来自 checkout / download-artifact / upload-artifact 等 actions/* 步骤，请查该步骤自身的报错。'
+          }

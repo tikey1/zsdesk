@@ -390,8 +390,9 @@ D02 原文的「不做进程内解码」指的是 **GuoheView 的 `ghde.dll` 解
   旧控件被销毁；`ui_page_reload`（`:565-577`）**重放旧源码** → 改不了 palette，**且同样重新编译** →
   同样失效）。
   → **三步协议**：`ui_page_destroy(旧 page)` → `ui_page_load_string(新源码)` → **重取全部 32 个句柄**
-  （`main.uix` 21 + `preview.uix` 6，架构侧已独立复核 distinct 数）→ 重挂回调 / 重投影状态。
-  **旧句柄继续用 = 写野内存 → 静默崩溃 / 花屏，不会报「句柄无效」。**
+  （`main.uix` 26 + `preview.uix` 6；**21 是第七轮前的旧值**，现值见 `assets/ui-ids.json`）→ 重挂回调 / 重投影状态。
+  **旧句柄在页面销毁后脱离控件树 → 继续写属性是「静默无效」（不崩溃、不报错、界面只是不刷新），
+  不是野内存**；core-ui 不会报「句柄无效」。机制更正见 `docs/14-QA-UIX-REVIEW.md` §15.3 O-2。
   **「自动回填」只覆盖一半**：`ui_page_on_widget_mount` 会自动回填**自绘控件的绘制回调** ✅，
   但**不会**更新 Rust 侧持有的 `ui_widget_find_by_id` 句柄 ❌。
   完整协议与故障判据见 `spec/ffi-core-ui.md` **§4.6**。
@@ -614,8 +615,9 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 **实现**：`scripts/gates/pe_exports.py`（无外部依赖的 PE 导出表解析器）
 + `scripts/gates/coreui_export_gate.py`（比对）。
-**验证**：解析器用本机 `GuoheView\core-ui.dll` 实测，**逐字节复现**
-`docs/05` 的 567 个 `ui_*` 基线；正例（346 DLL 对 345 源码）通过、
+**验证**：解析器用本机 `GuoheView\core-ui.dll` 实测，与
+`docs/05` 的 567 个 `ui_*` 基线**集合一致**（`diff` 因 Python stdout CRLF vs grep/sort LF
+返回 1，故**不是逐字节一致**）；正例（346 DLL 对 345 源码）通过、
 反例（截断 DLL / 无 `ui_*` 的 kernel32.dll）均正确失败。
 
 ---
@@ -652,6 +654,35 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 ---
 
+## D21 core-ui 构建退路 → **关闭，不启用**（2026-11-14 第 9 / 10 次 CI 证实）
+
+| 项 | 内容 |
+|---|---|
+| 原退路 | 若 clang-cl 源码构建始终不过，则改用 `cl.exe`，或直接用本机 `C:\Program Files\GuoheView\core-ui.dll` 定制副本 |
+| 实测 | 第 9 次 CI（run `43398079661`）与第 10 次 CI（run `43545192012`）的 core-ui job 源码构建**两次 success**，日志 3057 行完整落盘，PE / G2 / S7 全绿 |
+| 裁决 | **退路不启用**，仅留 `docs/15` §2.1 备查；D17 的根因诊断（PowerShell 日志管道被 stderr warning 中断）经真实 CI 证实 |
+| 代价 | 仍绑定 `packaging/core-ui-revision.txt` 的固定 revision 与 clang-cl + llvm-rc 工具链 |
+
+## D22 CI 的 Python 版本必须钉死（2026-11-14 新定）
+
+| 项 | 内容 |
+|---|---|
+| 起因 | runner 镜像自带的 `python` 会随镜像漂移；门禁脚本对 3.9 / 3.10+ 的注解语法敏感 |
+| 机制 | `from __future__ import annotations` **不作用于模块级与局部变量注解** —— `frozenset[str]` / `str \| None` 在 3.9 会直接抛错 |
+| 裁决 | rust / core-ui 两个 job 各加 `actions/setup-python@v5` 固定 **3.11**；三个门禁脚本同时改 `# type:` 注释形式保持 3.9 兼容 |
+| 代价 | 多两个 setup 步骤；**双保险**是即使将来去掉 setup-python，脚本也不会因语法炸掉 |
+
+## D23 失败原因必须走公开通道（2026-11-14 新定）
+
+| 项 | 内容 |
+|---|---|
+| 起因 | GitHub 的 job 日志下载端点需 admin（实测 `403 Must have admin rights to Repository.`），外部读不到；public repo 的 **check-run annotations 公开可读** |
+| 裁决 | **凡可能失败的步骤必须把判定理由 emit 成 `::error::`** ——「失败了但看不到为什么」本身就是需要修的缺陷 |
+| 落地 | 第 10 次 CI 靠该探针一次定位两个真因（`Cargo.lock` 漂移 / `GITHUB_WORKSPACE` 空值）；2026-11-14 补 package job 5 个步骤 + job 级兜底定位 |
+| 代价 | 每个可失败步骤多一段 try/catch；日志略长 |
+
+---
+
 ## 技术后果汇总（D01–D05 组合后必须一并解决）
 
 | # | 后果 | 归属 | 状态 |
@@ -667,7 +698,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 
 ---
 
-## 变更记录## 变更记录## 变更记录
+## 变更记录
 - 2026-11-13 建台账；D00 录入对话原话前提。
 - 2026-11-13 对话决策卡拍板 D01–D04（与用户 fork 路线图 C3/C3.6 一致；D02、D03 与路线图 P3 有出入，**以对话为准**）。
 - 2026-11-13 用户明确「以本次对话中的选择为主」，写入决策优先级规则。
@@ -921,8 +952,41 @@ $PSNativeCommandUseErrorActionPreference = $false
     public repo 的 **check-run annotations 公开可读** ⇒
     凡可能失败的步骤（`cargo test` / 五个 S13 门禁 / Gate S7'）必须把判定理由
     emit 成 `::error::`。**「失败了但看不到为什么」本身就是需要修的缺陷。**
-  - **事实更正**：第 9 次 CI 的 rust job 在第 6 步 `Test` 就失败
-    （`lib.rs` doctest 仍写骨架期 crate 名 `zc_ffi_coreui`），
-    **后续 S13 门禁与 `cargo build` 一步都没跑到** ⇒
-    「五个门禁已在 CI 里执行过」不成立，第 9 次 CI 实际只执行了 S7' 一个门禁
-    （且它失败了，原因未定位，已按 D22 / D23 加探针）。
+  - **事实更正（第 10 次 CI 后再次更正）**：第 9 次 CI 的 rust job 在第 6 步 `Test` 失败，
+    **后续 S13 门禁与 `cargo build` 一步都没跑到** ⇒「五个门禁已在 CI 里执行过」不成立，
+    第 9 次 CI 实际只执行了 S7' 一个门禁（且它失败了）。
+    ⚠️ 当时把 Test 失败归因为 `lib.rs` doctest 仍写骨架期 crate 名 `zc_ffi_coreui`，
+    **第 10 次 CI 已证伪**：真因是 `Cargo.lock` 手工拼接不合规导致 `--locked` 拒绝
+    （见 `docs/15` §0.2 真因 B）；doctest 只是同轮顺手修掉的确定性缺陷，不是 CI 失败原因。
+    S7' 当时「原因未定位」，第 10 次 CI 已定位为 `${{ env.GITHUB_WORKSPACE }}` 求值为空
+    （见 `docs/15` §0.2 真因 A）。
+- 2026-11-14 **第十四轮（成员复核阻断项收口 + 流程裁定）**：本轮**无新增产品/技术决策**，
+  故不占用 D 编号；仅记流程裁定与已落盘的修复。
+  - **流程裁定（记在 `PROJECT_STATE.md` 协作纪律）**：用户裁定「每天代码编写前先需通过成员互查」，
+    取消上一条「重新激活所有成员进行代码自查」作为持续要求；随后用户明确
+    「不用了，继续修复 bug」⇒ **本轮一次性豁免互查闸门**，长期规则不变。
+    上传前置判据仍是「互查 Go + 静态可复验阻断项清零」；第 11 次 CI 是上传之后的最终验证，
+    **不得拿它倒堵上传**。
+  - **P0 修复 ①**：`scripts/gates/theme_contrast_check.py` 的 `if not path.exists(): continue`
+    会让缺资产 / 0 字节资产静默 PASS → 改为缺资产 / 空文件 / 无 `<template>` / 零文字元素
+    一律 FAIL。顺带统一 G05 口径：先剥 HTML 注释、CSS 注释、`<script>`（旧版把注释里的
+    说明文字当成渲染文字，95 处「真实文字元素」混入注释文本；统一后为 18 处，双主题最低 5.78:1）。
+    本地 4 组负控 EXIT 符合预期（正常 0，删/空/全空 1）。
+  - **P0 修复 ②**：`crates/zsdesk-coreui/examples/probe.rs` 把非 NUL 结尾的 `String::as_ptr()`
+    传给按 C 字符串读取的 `ui_page_load_string` → 改为显式构造 NUL 结尾缓冲 + 内嵌 NUL 守卫。
+    本机无 cargo/rustc，**未编译验证**。
+  - **D23 落地补齐**：`package` job 原 12 步零 `::error::` → 5 个可失败步骤各加 try/catch
+    捕获（含 cargo 步骤的输出回灌）+ job 级兜底定位；YAML 解析通过、21 个 pwsh 块
+    语法解析 0 错误。
+  - **诚实性 / 一致性**：`docs/15` §1 三处不实措辞（13 个 `#[test]` 且从未执行 /
+    `diff` 返回 1 故非逐字节一致 / `zc_ffi_coreui` 并非全仓零残留）；
+    `PROJECT_STATE.md` 待决策编号改 `Q1/Q2` 并补推荐项、状态回写至第 10 次 CI；
+    本台账补 D21–D23 独立章节、修 `## 变更记录` 三重重复、更正第十三轮被证伪的 doctest 归因；
+    `SPEC.md` 决策范围 `D00–D11` → `D00~D23`；`crates/zsdesk-coreui/src/lib/api.rs`
+    旧句柄失效机制由「写野内存 / 崩溃」更正为「静默无效」。
+  - **交付基础设施**：`docs/ci.md` §2 / §6 对齐第 9 / 10 次 CI 实况并补记 smoke-probe 两步；
+    `packaging/windows/zsdesk.iss:38` 的 `manifest.json` → `manifest.sha256`（与打包产物一致）；
+    `spec/ci-contract.md` 消除三处自相矛盾的状态标记（第 31 / 34 条、§4.7 表格）。
+  - **仍未验证 / 未推送**：以上全部**尚未 commit、尚未 push**；`cargo test --locked`、
+    五个 S13 门禁、`cargo build`、Gate S7' 对 CI 内 DLL 的比对、`package` job 的首次执行，
+    均待第 11 次 CI 回答。

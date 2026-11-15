@@ -157,8 +157,23 @@ fn main() -> ExitCode {
     };
     println!("[OK] :root 注入完成（{} → {} 字节）", source.len(), injected.len());
 
-    // SAFETY: source 是活的 Rust 字符串，core-ui 在调用期间只读它。
-    let page = unsafe { (core.api.page_load_string)(injected.as_ptr()) };
+    // ---- 3b. 转成以 NUL 结尾的 C 字符串 ----
+    //
+    // `ui_page_load_string(*const u8)` 的 C 侧按 **NUL 结尾** 读取
+    // （page_api.cpp 用 strlen / const char* 解释这段内存）。Rust 的 `String`
+    // 不保证尾部有 NUL，`injected.as_ptr()` 直接传过去会让 C 侧越界读进
+    // 相邻堆内存 —— 表现为随机解析失败、读到垃圾文本或偶发崩溃，且极难定位。
+    // 同一文件下方 `--id` 的处理已经手动 `buf.push(0)`，这里必须一视同仁。
+    let mut c_page_source = injected.into_bytes();
+    if c_page_source.contains(&0) {
+        eprintln!("[FAIL] 注入后的页面源码含内嵌 NUL，C 字符串会被提前截断");
+        unsafe { (core.api.shutdown)() };
+        return ExitCode::FAILURE;
+    }
+    c_page_source.push(0);
+
+    // SAFETY: c_page_source 是以 NUL 结尾的 UTF-8 缓冲，调用期间存活且不变。
+    let page = unsafe { (core.api.page_load_string)(c_page_source.as_ptr()) };
     println!("[INFO] ui_page_load_string 返回句柄 {page}");
 
     // **失败判据**：句柄非 0 不代表成功。

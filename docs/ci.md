@@ -38,46 +38,51 @@ core-ui  ──┘
 
 ## 2. 步骤明细
 
-### job `rust`
-| 步骤 | 作用 | 验证状态 |
-|---|---|---|
-| checkout → `path: app` | 拉本仓库 | ✅ 已实跑 |
-| 读 `packaging/zsui-revision.txt` | 取钉住的 ref | ✅ 已实跑 |
-| checkout `qiu7824/zsui` → `path: zsui` | 满足 path 依赖（MPL-2.0） | ✅ 已实跑 |
-| `dtolnay/rust-toolchain@1.99.0` | 钉 Rust 版本 | ✅ 已实跑 |
-| `cargo test --workspace --release --locked` | 全量测试 | ✅ 已实跑 |
-| `cargo build --locked --release -p zsdesk-app` | 构建 full | ✅ 已实跑 |
-| `cargo clippy` | 静态检查，**不阻断** | ✅ 已实跑（上游未启用 clippy，告警清零后再改强制） |
-| upload artifact | 传 exe 给 package job | ✅ 已实跑 |
+> 验证状态以 **run `43545192012`（第 10 次 CI，commit `1a00121`）** 为准；
+> 「已实跑」= 在真实 CI 执行过，**不等同于通过**。第 11 次 CI 尚未触发，标 ⏳ 的都还没有真实结论。
 
-### job `core-ui`
+### job `rust`（10 步）
 | 步骤 | 作用 | 验证状态 |
 |---|---|---|
-| checkout → `path: app` | 仅为读 revision | ✅ 已实跑 |
-| checkout `ghboke/core-ui` → `path: core-ui` | 取钉住的 revision | ✅ 已实跑 |
-| **Locate clang-cl and llvm-rc** | 多候选探测 clang-cl；**llvm-rc 缺失即失败** | ✅ 已实跑 |
-| Ensure Ninja | 缺失则 `python -m pip install ninja` | ✅ 已实跑 |
-| **Pre-fetch QuickJS-NG** | 预置到 FetchContent 落点，消除联网不确定性 | ⬜ 本次新增 |
-| Build core-ui from source | 调上游 `scripts/build-clang-cl.ps1 -Target core-ui` | ❌ **首次实跑失败** |
-| Verify core-ui.dll is x86-64 | 读 PE header 断言 `Machine == 0x8664` | ⬜ 未跑到 |
-| **Gate S7 — CRT 动态判定** | `dumpbin /dependents` 必须出现 `VCRUNTIME140.dll` + `MSVCP140.dll` | ⬜ 未跑到 |
-| upload artifact | 传 dll 给 package job | ⬜ 未跑到 |
+| checkout → `path: app` + 读 pin + checkout `zsui` → `path: zsui` | 满足 `../../../zsui` path 依赖（MPL-2.0） | ✅ 已实跑 |
+| `setup-python@v5`（3.11）+ `dtolnay/rust-toolchain@1.99.0` | 钉版本（D22） | ✅ 已实跑 |
+| `cargo test --workspace --release --locked` | 全量测试 | ❌ **第 9 / 10 次 CI 均失败**；真因 = `Cargo.lock` 手工拼接不合规，本地已修，**待第 11 次 CI 复验** |
+| Gate S13（5 个门禁） | 标签 / token 命名空间 / id 清单 / 对比度 / 间距 | ⏳ **从未跑到**（Test 失败即跳过后续） |
+| `cargo build --locked --release -p zsdesk-app` | 构建 full | ⏳ 从未跑到 |
+| `cargo clippy` | 静态检查，**不阻断** | ⏳ 从未跑到 |
+| upload artifact | 传 exe 给 package job | ⏳ 从未跑到 |
 
-### job `package`
+### job `core-ui`（16 步）
 | 步骤 | 作用 | 验证状态 |
 |---|---|---|
-| checkout → `path: app` | 拿 LICENSE / Cargo.toml | ⬜ 未跑到 |
-| download 两个 artifact | exe 与 core-ui.dll | ⬜ 未跑到 |
-| **Gate S12** | `core-ui.dll` 必须与 exe 同目录（否则运行时可能命中 PATH 里的别的副本） | ⬜ 未跑到 |
-| Collect VC++ x64 CRT | vswhere → `VC\Redist\MSVC\<ver>\x64\Microsoft.VC*.CRT` | ⬜ 未跑到 |
-| Package ZIP | exe + `core-ui.dll` + 3 个 CRT + LICENSE + 逐文件 `bytes + SHA-256` manifest | ⬜ 未跑到 |
-| upload artifact | `ZSDesk-full-x64` | ⬜ 未跑到 |
+| checkout + Locate clang-cl/llvm-rc + Ensure Ninja + Pre-fetch QuickJS-NG | 工具链准备 | ✅ 第 9 / 10 次均成功 |
+| Configure and build core-ui from source | 调上游 `scripts/build-clang-cl.ps1 -Target core-ui` | ✅ **连续两次 success**，日志 3057 行完整落盘 |
+| Verify x86-64 / Gate G2 / Gate S7 | PE 位数 / revision 戳记 / 动态 CRT | ✅ 三次全绿 |
+| **Gate S7'** | DLL 导出面 vs 同 checkout `src/` 的 `UI_API` 定义集 | ❌ 两次失败；真因 = `${{ env.GITHUB_WORKSPACE }}` 求值为空，已改用 `$env:GITHUB_WORKSPACE` + `Join-Path`，**待复验** |
+| upload artifact | 传 dll 给 package job | ✅ 已实跑 |
+
+### job `package`（13 步）
+| 步骤 | 作用 | 验证状态 |
+|---|---|---|
+| checkout `app` + 读 pin + checkout `zsui` | 满足 workspace 整体解析（缺一不可） | ⏳ skipped（上游 job 失败连带） |
+| download 两个 artifact | exe 与 `core-ui.dll` | ⏳ skipped |
+| **Gate S12** | `core-ui.dll` 与 exe 同目录 | ⏳ 未跑到 |
+| Collect VC++ x64 CRT | vswhere → `VC\Redist\MSVC\<ver>\x64\Microsoft.VC*.CRT` | ⏳ 未跑到 |
+| **Build the core-ui smoke probe** | `cargo build -p zsdesk-coreui --example probe` | ⏳ 未跑到；**`probe.rs` 从未被 rustc 编译过**，是最大未知 |
+| **Smoke-probe** | 用真实 DLL + `assets/main.uix` 跑 U01~U03 + `:root` 注入（U04） | ⏳ 未跑到 |
+| Package ZIP | exe + DLL + 戳记校验 + `assets/` 四件套 + 3 个 CRT + LICENSE + `manifest.sha256` | ⏳ 未跑到 |
+| Upload `ZSDesk-full-x64` | ZIP artifact | ⏳ 未跑到 |
+| **Package job failure locator** | job 失败时把失败步骤名 emit 成 `::error::` | 🆕 2026-11-14 新增，**未经 CI 验证** |
 
 ---
 
 ## 3. 第一次 CI 实跑结果（run `43387095246`，commit `d4b3bb5`）
 
-**结果：失败 —— 12 个步骤里前 11 个全过，挂在第 12 步 `Build core-ui from source`。**
+> ⚠️ **本节是 2026-11-13 的历史记录**，其中「core-ui 从源码构建失败」的结论
+> **已被第 9 / 10 次 CI 推翻**（连续 success，见 §2 与 §6）。
+> 保留原文仅用于追溯当时的加固决定，**不作为当前状态依据**。
+
+**当时结果：失败 —— 12 个步骤里前 11 个全过，挂在第 12 步 `Build core-ui from source`。**
 
 | 步骤 | 结果 |
 |---|---|
@@ -138,21 +143,30 @@ CI 上的雷点：① `GIT_SHALLOW` + tag 的浅克隆；② quickjs 的子模�
 | `core-ui.dll does not depend on VCRUNTIME140.dll` | CRT 不是动态 `/MD` | 两侧都必须 `/MD`；core-ui 默认即 `/MD`，**不要**启用 `-StaticCrt`/`/MT` |
 | `ninja is still not on PATH` | pip 安装未生效 | 改用 `choco install ninja` |
 | `Visual C++ x64 Redistributable directory not found` | runner 缺 VC++ 工具组件 | 检查 vswhere 的 `-requires` 条件 |
-| `cargo test` 失败 | 上游 Rust 代码问题 | **与 core-ui 无关** |
+| `cargo test` 报 `cannot update the lock file ... --locked` | `Cargo.lock` 与 workspace manifests 不同步（本机无 cargo 时**手工追加 `[[package]]`** 最易触发：破坏排序、写错依赖名） | 不要手工拼 lock；CI 的 Test 失败分支会跑 `cargo metadata` 并把 `git diff -- Cargo.lock` 打进 annotations |
+| Gate S7' 报 `core-ui.dll not found at \core-ui\...` | `${{ env.GITHUB_WORKSPACE }}` 求值为空 —— `GITHUB_WORKSPACE` 是 **shell 环境变量**，不是 Actions `env` 上下文的键 | 用 `$env:GITHUB_WORKSPACE` + `Join-Path`，不要用 `${{ env.GITHUB_WORKSPACE }}` |
+| package job 失败但 annotations 为空 | 该 job 的 `actions/*` 步骤（checkout / download / upload）失败时不会 emit annotation | 查 job 末尾的 `Package job failure locator` 步骤，它会指认失败来自哪一类步骤 |
+| `cargo test` 失败（其它） | 上游 Rust 代码问题 | **与 core-ui 无关** |
 
 ---
 
 ## 6. 已验证 / 未验证分界
 
+> 以第 10 次 CI（run `43545192012`）为止的实测为准；**第 11 次 CI 尚未触发**。
+
 | 环节 | 状态 | 证据 |
 |---|---|---|
-| checkout + Rust 工具链 + `cargo test --workspace --release --locked` + 多 edition `cargo check` 矩阵 | ✅ **实跑通过** | fork 的 `Windows build #1`，commit `4a48349`，9m 58s，绿灯 |
-| 收窄后的「仅 full edition」build / test / clippy | ✅ **实跑通过** | run `43387095246`，步骤 7/8/9 全绿 |
-| clang-cl 探测 + Ninja 安装 | ✅ **实跑通过** | 同上，步骤 10/11 全绿 |
-| **core-ui 从源码构建** | ❌ **实跑失败** | 同上，步骤 12 失败；**失败日志待取** |
-| `core-ui.dll` 的 x64 断言 / Gate S7 / Gate S12 | ⬜ 未跑到 | 依赖上一步 |
-| 便携 ZIP 打包 + `bytes + SHA-256` manifest | ⬜ 未跑到 | 依赖前两步 |
-| QuickJS-NG 预置加固是否解决问题 | ⬜ **待验证** | 下一次 CI |
+| fork 的基线 CI（commit `4a48349`，`Windows build #1`，9m58s） | ✅ 通过 | **上游基线**，尚未接入 core-ui；不代表当前项目 |
+| checkout / 工具链 / `zsui` 同级检出 | ✅ 已实跑 | run `43398079661` / `43545192012` |
+| clang-cl + llvm-rc + Ninja + QuickJS-NG 预置 | ✅ 已实跑成功 | 同上 |
+| **core-ui 从源码构建** | ✅ **第 9 / 10 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
+| `core-ui.dll` 的 x64 断言 / Gate G2 / Gate S7 | ✅ 三次全绿 | 同上 |
+| `cargo test --workspace --release --locked` | ❌ **两次失败** | 真因 = `Cargo.lock` 手工拼接不合规；本地已修，**待第 11 次 CI** |
+| 五个 S13 门禁 / `cargo build` / clippy | ⏳ **从未在 CI 跑到** | Test 失败即跳过后续步骤 |
+| Gate S7' 对 CI 内 DLL 的导出面比对 | ❌ 两次失败 | 真因 = `env.GITHUB_WORKSPACE` 表达式求值为空；本地已修，**待复验** |
+| Gate S12 / 收 CRT / smoke-probe / 便携 ZIP / `manifest.sha256` / 上传 | ⏳ **从未真正执行** | package job 两次均被上游失败连带 skipped |
+| `probe.rs` 的类型检查 / 借用检查 / 实际运行 | ⏳ **从未编译** | 本机无 cargo/rustc，只能由 CI 回答 |
+| 失败原因的公开可见性（D23） | ✅ 第 10 次 CI 已证明有效 | `::error::` annotations 一次定位两个真因；package job 补齐于 2026-11-14，**未经 CI 验证** |
 
 ---
 

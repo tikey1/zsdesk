@@ -247,8 +247,9 @@ extern "C" {
 extern "C" {
     /// 按 id 取控件句柄。★ **句柄的生命周期绑在 page 上**：
     /// 页面重建（`ui_page_load_string` 返回新 page）后，
-    /// **之前拿到的所有句柄全部失效** —— 继续用 = 写野内存 = 静默崩溃 / 花屏，
-    /// core-ui **不会**报「句柄无效」。
+    /// **之前拿到的所有句柄全部失效** —— 页面销毁后旧 widget 脱离控件树，
+    /// 继续写属性是**静默无效**（不崩溃、不报错，界面只是不刷新），
+    /// 不是野内存；core-ui **不会**报「句柄无效」。
     /// → 切主题 / 换 accent 后必须**重取全部 32 个**（`spec/ffi-core-ui.md` §4.6）。
     /// 返回 0 = 没找到（Rust 侧必须能区分「找不到」与「整页加载失败」）。
     pub fn ui_widget_find_by_id(root: UiWidget, id: *const u8) -> UiWidget;
