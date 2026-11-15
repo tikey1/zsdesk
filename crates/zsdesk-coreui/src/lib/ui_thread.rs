@@ -72,8 +72,17 @@ unsafe extern "C" fn task_trampoline(ud: *mut std::ffi::c_void) {
 /// 跨线程句柄。可 `Copy`，可交给工作线程。
 #[derive(Clone, Copy, Debug)]
 pub struct UiHandle {
-    /// 从 UI 线程拷出来的封送函数指针，工作线程调用它时不需要解引用 `CoreUi`。
-    invoke_sync: UiInvokeCallback,
+    /// 从 UI 线程拷出来的封送函数指针（`ui_window_invoke_sync`），
+    /// 工作线程调用它时不需要解引用 `CoreUi`。
+    /// ★ 类型必须和 `Api::window_invoke_sync` 完全一致 —— 3 个参数
+    /// （窗口 / 回调 / 用户数据）。原先误写成 `UiInvokeCallback`（回调本身，
+    /// 1 参数），同时触发 E0308（handle() 赋值类型不符）与 E0061
+    /// （`invoke_sync` 里 3 实参调 1 形参）—— 第 13 次 CI 实测。
+    invoke_sync: unsafe extern "C" fn(
+        UiWindow,
+        UiInvokeCallback,
+        *mut std::ffi::c_void,
+    ),
     /// 只在 UI 线程解引用。
     core: *const CoreUi,
     window: UiWindow,

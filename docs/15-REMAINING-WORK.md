@@ -150,6 +150,36 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 
 ---
 
+## 0.5 第 13 次 CI（run `43671423536`，commit `16066e6`）实测结果
+
+| job | 步骤名 | 结果 | 结论 |
+|---|---|---|---|
+| core-ui | 全部（含 Gate S7'） | **success** | C++ 源码构建第五次成功 |
+| Rust | Gate S14 — Rust module layout | **success** | cp1252 编码修复生效，门禁首次跑过 |
+| Rust | Gate S13 — the mechanical .uix / theme gates | **success** | 五个 S13 门禁**首次在 CI 执行并通过**（六脚本 UTF-8 加固生效） |
+| Rust | Test | **failure** | `zsdesk-coreui` 5 个模块首次被 rustc 编译，报 5 个错误 |
+| Rust | Build / Clippy / Upload | skipped | Test 失败即跳过 |
+| package | 全部 | skipped | 第五次跳过 |
+
+**真因 G —— 从未编译过的 Rust 代码里的 5 个类型/借用错误**（公开 annotations 给出错误码，
+本机无 cargo/rustc，靠静态逐条定位）：
+
+| 错误 | 位置 | 根因与修法 |
+|---|---|---|
+| `E0277` | `loader.rs:366` | `libloading::Library::new(c_path)` 传了 `CString`，0.8 要求 `AsRef<OsStr>` → 改传 `path.as_os_str()`，删掉 `CString` |
+| `E0631` / `E0308`（其一） | `loader.rs:366` | `LoadError::Load(std::io::Error)` 与 `libloading::Error` 不符 → 变体类型改 `libloading::Error` |
+| `E0308` / `E0061` | `ui_thread.rs:76` + `:128` | `UiHandle.invoke_sync` 字段误声明为 `UiInvokeCallback`（回调，1 参数），但 `handle()` 赋的是 `Api::window_invoke_sync`（封送函数，3 参数），128 行又按 3 实参调用 → 字段类型改 3 参数函数指针，两个错误一起消失 |
+| `E0382` | `lib.rs:169` | `StartupReport` 里 `capabilities: core.capabilities` 移动后又 `Ok((core, report))` → 改 `.clone()` |
+
+**可观测性改进**：Test 步骤的 annotation 探针原先只打错误码，看不到出错位置（本轮就是
+靠静态推断定位的）。现改为 `Select-String -Pattern '^error' -Context 0,5`，把 rustc 的
+`--> 文件:行:列` 与代码片段一并打进公开 annotations（D23）。
+
+**仍未验证**：`cargo test` 及其后所有步骤从未跑通；修完这 5 个错误后仍可能暴露下一批
+编译错误。只能由第 14 次 CI 逐层回答。
+
+---
+
 ## 1. 已写入磁盘的改动与静态复核记录
 
 > **口径（2026-11-15 更新）**：本表混合三类条目，逐行带标签 ——

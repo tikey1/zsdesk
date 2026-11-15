@@ -166,7 +166,9 @@ impl CoreUi {
             dll_path: core.dll_path.display().to_string(),
             expected_revision: version::EXPECTED_REVISION.to_string(),
             revision_stamp: RevisionStamp::check(&core.dll_path, version::EXPECTED_REVISION),
-            capabilities: core.capabilities,
+            // Capabilities 不是 Copy；这里若直接移动，下面 Ok((core, report))
+            // 就会变成 use of partially moved value（第 13 次 CI 的 E0382）。
+            capabilities: core.capabilities.clone(),
         };
         Ok((core, report))
     }

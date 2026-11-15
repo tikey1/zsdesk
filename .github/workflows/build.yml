@@ -95,9 +95,21 @@ jobs:
           $code = $LASTEXITCODE
           if ($code -ne 0) {
             Write-Host '::error title=cargo test::cargo test 失败，下面是关键行：'
+            # 编译错误必须带 rustc 的后 5 行上下文（含 `--> 文件:行:列` 与代码片段）。
+            # 第 13 次 CI 只打出错误码，看不到出错位置，白白多花一轮定位。
             Get-Content test-output.txt |
-              Select-String -Pattern 'error\[|error:|FAILED|panicked|test result: FAILED|failures:' |
-              Select-Object -First 25 |
+              Select-String -Pattern '^error' -Context 0,5 |
+              Select-Object -First 6 |
+              ForEach-Object {
+                Write-Host ("::error title=cargo test::" + $_.Line.Trim())
+                $_.Context.PostContext | ForEach-Object {
+                  $l = ([string]$_).Trim()
+                  if ($l) { Write-Host ("::error title=cargo test::  " + $l) }
+                }
+              }
+            Get-Content test-output.txt |
+              Select-String -Pattern 'FAILED|panicked|test result: FAILED|failures:' |
+              Select-Object -First 10 |
               ForEach-Object { Write-Host ("::error title=cargo test::" + $_.Line.Trim()) }
             # 锁文件漂移自诊断：本机无 cargo。若 Cargo.lock 仍与 manifests 不同步，
             # 让 CI 用 cargo 重写一次并把 diff 回传，便于把准确结果落回仓库。

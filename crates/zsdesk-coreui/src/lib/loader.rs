@@ -17,7 +17,6 @@
 //! 3. **CRT 冲突**：链接期会直接撞 `LNK2038 RuntimeLibrary mismatch`；
 //!    运行时加载不存在这道坎，但代价是**内存所有权必须严格**（见 `api.rs`）。
 
-use std::ffi::CString;
 use std::path::{Path, PathBuf};
 
 use crate::api::*;
@@ -43,7 +42,7 @@ pub enum LoadError {
     /// DLL 文件不存在。
     NotFound(Vec<PathBuf>),
     /// DLL 存在但不是合法的 PE / 依赖缺失 / 位数不符。
-    Load(std::io::Error),
+    Load(libloading::Error),
     /// 缺少必需符号。
     Missing(MissingSymbol),
     /// 版本低于绑定层支持的最低版本。
@@ -358,12 +357,12 @@ pub struct CoreUi {
 impl CoreUi {
     /// 从给定路径加载。
     pub fn load_from(path: &Path) -> Result<Self, LoadError> {
-        // libloading 需要以 NUL 结尾的 UTF-8 路径。
-        let c_path = CString::new(path.as_os_str().to_string_lossy().as_bytes())
-            .map_err(|_| LoadError::NotFound(vec![path.to_path_buf()]))?;
+        // libloading 0.8 的 Library::new 接受 AsRef<OsStr>，直接传 &Path 的 OsStr。
+        // 不能传 CString —— 第 13 次 CI 的 E0277：CString 不实现 AsRef<OsStr>。
         // SAFETY: 路径由调用方给出；加载的是用户本机已安装 / CI 自建的 DLL。
         // 位数必须与本进程一致（x86-64，D00-7），libloading 在不匹配时会报错。
-        let lib = unsafe { libloading::Library::new(c_path) }.map_err(LoadError::Load)?;
+        let lib = unsafe { libloading::Library::new(path.as_os_str()) }
+            .map_err(LoadError::Load)?;
 
         // SAFETY: 符号名与 `api.rs` 的声明一致；缺失由 bind 返回 Err 而非崩溃。
         let api = unsafe { Api::bind(&lib) }.map_err(LoadError::Missing)?;

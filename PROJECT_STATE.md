@@ -16,9 +16,10 @@
 - **core-ui 的 C++ 源码构建**：第 9 / 10 / **11 次 CI 连续 success**。第 11 次连 **Gate S7' 也转绿** ⇒ `${{ env.GITHUB_WORKSPACE }}` 空值的修复生效，M0 最大未知已消除。
 - **第 10 次 CI**（`1a00121`）定位的两真因（`Cargo.lock` 不同步 / `env.GITHUB_WORKSPACE` 空值）已在 `aa7e9b5` 修复并推送，第 11 次 CI 证实修复有效。
 - **第 11 次 CI**（`aa7e9b5`）：core-ui 全绿；rust job 的 Test 报 5 条 `error[E0583]`（模块布局），已加 `#[path]` 修复。
-- **第 12 次 CI**（run `43670088427`，commit `6f96662`）：core-ui job **全绿**；rust job 在新增的 **Gate S14** 失败，真因是 **Windows runner 的 Python stdout 默认 `cp1252`，门禁打印中文抛 `UnicodeEncodeError`**（本机中文环境复验全绿 ⇒ 本地绿不代表 CI 绿）；package job 第三次 skipped。**`cargo test` 仍未跑到**。
-- **2026-11-15 本轮修复**：`build.yml` 顶层 `env` 钉 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`；六个含中文输出的门禁脚本各加 `sys.stdout.reconfigure(encoding='utf-8')` 自包含加固。用 `PYTHONIOENCODING=cp1252` 本地复现崩溃并验证修复后六个门禁全 `EXIT=0`，负控仍报 5 条 E0583。
-- `package` job 至今**从未真正执行过**；`cargo test` / `cargo build` / 五个 S13 门禁 / `probe.rs` 编译都还没在 CI 跑到 —— 只能由第 13 次 CI 逐层回答。
+- **第 12 次 CI**（`6f96662`）：core-ui 全绿；新增 Gate S14 因 **Windows `cp1252` 编码**崩溃。已用全局 `PYTHONIOENCODING=utf-8` + 六脚本 UTF-8 自包含加固修复。
+- **第 13 次 CI**（run `43671423536`，commit `16066e6`）：core-ui 全绿；**Gate S14 与 Gate S13 首次都跑过**；`Test` 失败 —— `zsdesk-coreui` 5 个模块**首次被 rustc 编译**，暴露 5 个错误：`E0277`（CString 不实现 `AsRef<OsStr>`）、`E0631`/`E0308`（`LoadError::Load` 类型写错 + `UiHandle.invoke_sync` 字段类型写成 1 参数回调）、`E0061`（3 实参调 1 形参）、`E0382`（`core.capabilities` 部分移动）。package job 第五次 skipped。
+- **2026-11-15 本轮修复（5 个错误全定位）**：`loader.rs` 改传 `path.as_os_str()` + `LoadError::Load(libloading::Error)`；`lib.rs` 的 `capabilities` 改 `.clone()`；`ui_thread.rs` 把 `invoke_sync` 字段类型改成与 `Api::window_invoke_sync` 一致的 3 参数函数指针。另改进 Test 的 annotation 探针，编译错误现在带 rustc 的 `--> 文件:行:列` 上下文。
+- `package` job 至今**从未真正执行过**；`cargo test` / `cargo build` / `probe.rs` 编译仍待第 14 次 CI 逐层回答。
 - **新工作流（用户 2026-11-15 裁定）**：代码写完**主动上传**，并**主动根据 Action 结果改代码再上传**，循环到 CI 转绿；不再逐次请示上传。互查沿用同一闭环的一次性豁免，长期规则见「协作纪律」。
 
 ## 已完成

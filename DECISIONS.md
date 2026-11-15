@@ -1040,5 +1040,25 @@ $PSNativeCommandUseErrorActionPreference = $false
     全部 `EXIT=0`；S14 负控仍精确报 5 条 E0583。
   - **新增环境事实**：以后凡新增打印中文的门禁脚本，必须沿用这套 UTF-8 加固；
     本地复验须额外跑一次 `PYTHONIOENCODING=cp1252` 模拟 runner。
-  - **仍未验证**：`cargo test` 及其后所有步骤从未在 CI 跑到；`zsdesk-coreui` 5 个模块
-    首次被 rustc 编译可能暴露下一批类型 / 借用错误。待第 13 次 CI 逐层回答。
+  - **当时状态（历史快照）**：`cargo test` 及其后所有步骤从未在 CI 跑到，待第 13 次 CI。
+    → **后续已变**：以 commit `16066e6` 推送，第 13 次 CI 结果见下方第十七轮。
+- 2026-11-15 **第十七轮（第 13 次 CI 结果回写 + Rust 首次编译的 5 个错误修复）**：
+  本轮**无新增用户决策**，不占 D 编号。
+  - **第 13 次 CI 裁决**：commit `16066e6`，run `43671423536`。core-ui job **全绿**；
+    **Gate S14 与五个 S13 门禁首次在 CI 执行并全部通过** ⇒ cp1252 编码修复（第十六轮）
+    经真实 CI 证实有效。`Test` 失败：5 个模块首次被 rustc 编译，报
+    `E0277` / `E0631` / `E0308` / `E0061` / `E0382`。package job 第五次 skipped。
+  - **根因**：这批 `.rs` 是骨架期手写、从未编译过的代码，与 `libloading 0.8` 的实际
+    API 及 Rust 所有权规则不符。**「tree-sitter 语法零错误」与「能编译」是两回事**，
+    静态复核（含 `pub use` 名字核对）也覆盖不到类型 / 借用检查。
+  - **修法（5 个错误逐条）**：
+    · `loader.rs` —— `CString` → `path.as_os_str()`（E0277）；
+      `LoadError::Load(std::io::Error)` → `LoadError::Load(libloading::Error)`（E0631/E0308）；
+    · `ui_thread.rs:76` —— `UiHandle.invoke_sync` 字段类型由 `UiInvokeCallback`
+      （1 参数回调）改为 `unsafe extern "C" fn(UiWindow, UiInvokeCallback, *mut c_void)`，
+      与 `Api::window_invoke_sync` 一致，同时解掉 E0308 与 E0061；
+    · `lib.rs:169` —— `capabilities: core.capabilities.clone()`（E0382）。
+  - **可观测性（D23 延续）**：Test 的 annotation 探针改为带 `-Context 0,5`，
+    把 rustc 的 `--> 文件:行:列` 与代码片段打进公开 annotations，避免再靠猜定位。
+  - **仍未验证**：`cargo test` / `cargo build` / package job / `probe.rs` 编译从未跑通；
+    修完这 5 个后仍可能暴露下一批编译错误。待第 14 次 CI 逐层回答。
