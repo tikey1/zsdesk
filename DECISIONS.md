@@ -1060,5 +1060,16 @@ $PSNativeCommandUseErrorActionPreference = $false
     · `lib.rs:169` —— `capabilities: core.capabilities.clone()`（E0382）。
   - **可观测性（D23 延续）**：Test 的 annotation 探针改为带 `-Context 0,5`，
     把 rustc 的 `--> 文件:行:列` 与代码片段打进公开 annotations，避免再靠猜定位。
-  - **仍未验证**：`cargo test` / `cargo build` / package job / `probe.rs` 编译从未跑通；
-    修完这 5 个后仍可能暴露下一批编译错误。待第 14 次 CI 逐层回答。
+  - **当时状态（历史快照）**：待第 14 次 CI。→ **后续已变**：commit `33aca13`，
+    第 14 次结果见下方第十八轮。
+- 2026-11-15 **第十八轮（第 14 次 CI 结果回写 + 探针有效性验证）**：无新增用户决策。
+  - **第 14 次 CI**：commit `33aca13`，run `43672643005`。core-ui 全绿；
+    Gate S14 与五个 S13 门禁保持通过；第十七轮修的 5 个编译错误**全部消失**，
+    证明逐条定位正确。Test 只剩 1 个错误：公开 annotations 直接给出
+    `error[E0308] if/else 类型不符` + `examples/probe.rs:187`。
+  - **探针改进（第十七轮）已由真实 CI 证实有效**：带 `-Context 0,5` 后，
+    错误位置行不再需要静态推断，一轮即可定位（D23）。
+  - **修法**：`probe.rs` 的 `String::from_utf8_lossy(...)` 加 `.into_owned()`，
+    与 `if` 分支的 `String::new()` 统一为 `String`。
+  - **仍未验证**：`cargo test` 全量（含 doctest）/ `cargo build` / package job /
+    `probe.rs` 实际运行。待第 15 次 CI。

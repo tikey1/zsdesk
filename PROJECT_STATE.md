@@ -19,7 +19,9 @@
 - **第 12 次 CI**（`6f96662`）：core-ui 全绿；新增 Gate S14 因 **Windows `cp1252` 编码**崩溃。已用全局 `PYTHONIOENCODING=utf-8` + 六脚本 UTF-8 自包含加固修复。
 - **第 13 次 CI**（run `43671423536`，commit `16066e6`）：core-ui 全绿；**Gate S14 与 Gate S13 首次都跑过**；`Test` 失败 —— `zsdesk-coreui` 5 个模块**首次被 rustc 编译**，暴露 5 个错误：`E0277`（CString 不实现 `AsRef<OsStr>`）、`E0631`/`E0308`（`LoadError::Load` 类型写错 + `UiHandle.invoke_sync` 字段类型写成 1 参数回调）、`E0061`（3 实参调 1 形参）、`E0382`（`core.capabilities` 部分移动）。package job 第五次 skipped。
 - **2026-11-15 本轮修复（5 个错误全定位）**：`loader.rs` 改传 `path.as_os_str()` + `LoadError::Load(libloading::Error)`；`lib.rs` 的 `capabilities` 改 `.clone()`；`ui_thread.rs` 把 `invoke_sync` 字段类型改成与 `Api::window_invoke_sync` 一致的 3 参数函数指针。另改进 Test 的 annotation 探针，编译错误现在带 rustc 的 `--> 文件:行:列` 上下文。
-- `package` job 至今**从未真正执行过**；`cargo test` / `cargo build` / `probe.rs` 编译仍待第 14 次 CI 逐层回答。
+- **第 14 次 CI**（run `43672643005`，commit `33aca13`）：core-ui 全绿；**5 个 Rust 编译错误全部消失**，改进后的 annotation 探针直接给出精确定位 —— 只剩 `examples/probe.rs:187` 的 `E0308`（`if` 分支 `String::new()` 与 `else` 分支 `Cow<str>` 类型不符）。`cargo test` 仍未通过，package job 第六次 skipped。
+- **本轮修复**：`probe.rs` 的 `from_utf8_lossy(...)` 加 `.into_owned()` 统一为 `String`。按新规矩主动上传，待第 15 次 CI。
+- `package` job 至今**从未真正执行过**；`cargo test` / `cargo build` / `probe.rs` 运行仍待第 15 次 CI 逐层回答。
 - **新工作流（用户 2026-11-15 裁定）**：代码写完**主动上传**，并**主动根据 Action 结果改代码再上传**，循环到 CI 转绿；不再逐次请示上传。互查沿用同一闭环的一次性豁免，长期规则见「协作纪律」。
 
 ## 已完成

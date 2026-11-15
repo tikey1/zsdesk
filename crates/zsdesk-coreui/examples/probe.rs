@@ -184,7 +184,10 @@ fn main() -> ExitCode {
     } else {
         // SAFETY: last_error 指向以 NUL 结尾的 UTF-8 文本。
         unsafe {
+            // from_utf8_lossy 返回 Cow<str>，而 if 的另一支是 String —— 必须
+            // .into_owned() 统一类型（第 14 次 CI 的 E0308）。
             String::from_utf8_lossy(std::slice::from_raw_parts(last_error, c_str_len(last_error)))
+                .into_owned()
         }
     };
     // SAFETY: 同上。

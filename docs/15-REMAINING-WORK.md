@@ -180,6 +180,30 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 
 ---
 
+## 0.6 第 14 次 CI（run `43672643005`，commit `33aca13`）实测结果
+
+| job | 结果 | 结论 |
+|---|---|---|
+| core-ui | **success** | 含 Gate S7'，第六次成功 |
+| Rust — Gate S14 / Gate S13 | **success** | 编码与门禁保持通过 |
+| Rust — Test | **failure** | 第 13 次的 5 个编译错误**全部消失**；只剩 1 个新错误 |
+| package | skipped | 第六次跳过 |
+
+**真因 H（唯一剩余）**：改进后的 annotation 探针首次生效，直接给出
+`error[E0308]: if and else have incompatible types` 与
+`--> crates/zsdesk-coreui/examples/probe.rs:187:13`。
+`err_text` 的 `if` 分支是 `String::new()`（`String`），`else` 分支是
+`String::from_utf8_lossy(...)`（`Cow<str>`）⇒ 类型不符。
+修法：`from_utf8_lossy(...).into_owned()`。
+
+**探针改进已验证有效**：第 13 次只有错误码、靠静态推断定位；第 14 次直接拿到
+文件:行:列，一轮定位完成（D23）。
+
+**仍未验证**：`cargo test` 全量（含 doctest）、`cargo build`、package job、
+`probe.rs` 实际运行。待第 15 次 CI。
+
+---
+
 ## 1. 已写入磁盘的改动与静态复核记录
 
 > **口径（2026-11-15 更新）**：本表混合三类条目，逐行带标签 ——
