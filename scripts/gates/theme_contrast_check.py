@@ -295,5 +295,12 @@ def main() -> int:
     return 0
 
 
+# Windows runner 的 stdout 默认 cp1252，直接打印中文会抛 UnicodeEncodeError，
+# 让门禁以「看起来失败」的方式崩掉（第 12 次 CI 的 Gate S14 实测）。
+# 强制 UTF-8，保证脚本在 CI / 本机 / 被 import 时行为一致。
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 if __name__ == "__main__":
     sys.exit(main())

@@ -16,6 +16,13 @@ env:
   # CI 里的 git 一律不交互：否则遇到认证提示会挂死到超时
   GIT_TERMINAL_PROMPT: '0'
   GIT_ASKPASS: 'echo'
+  # ★ Windows runner 的 Python stdout 默认 cp1252。门禁脚本打印中文判定理由时
+  # 会抛 UnicodeEncodeError，让门禁以「看起来失败」的方式崩掉
+  # （第 12 次 CI 的 Gate S14 实测：check-run annotations 里整段 traceback）。
+  # 全局钉 UTF-8，一次覆盖所有 python 调用、六个门禁脚本与未来新增门禁。
+  # 各脚本本身也带一段自包含加固，保证脱离 workflow 单独运行同样不崩。
+  PYTHONIOENCODING: 'utf-8'
+  PYTHONUTF8: '1'
 
 jobs:
   # ==================================================================

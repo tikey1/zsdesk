@@ -1016,6 +1016,29 @@ $PSNativeCommandUseErrorActionPreference = $false
     本地正常态覆盖 6 crate root / 127 个 `.rs`；负控①去掉 `#[path]` → 精确复现第 11 次 CI
     的 5 条 E0583，负控②保留 `#[path]` 抽掉 `theme.rs` → 精确点名 theme。
     **规则**：编译前能机械发现的问题，不许再浪费一整轮 CI。
-  - **仍未验证 / 未推送**：以上修复**尚未 commit、尚未 push**。`zsdesk-coreui` 5 个模块
-    首次被 rustc 编译可能暴露下一批类型 / 借用错误；五个 S13 + 新 S14 门禁、
+  - **当时状态（历史快照）**：以上修复**尚未 commit、尚未 push**；五个 S13 + 新 S14 门禁、
     `cargo build`、package job 首次产出 ZIP、`probe.rs` 首次编译，均待第 12 次 CI 回答。
+    → **后续已变**：以 commit `6f96662` 推送，第 12 次 CI 结果见下方第十六轮。
+- 2026-11-15 **第十六轮（第 12 次 CI 结果回写 + Windows 编码根因修复 + 工作流裁定）**：
+  - **流程裁定（新，见 `PROJECT_STATE.md` 协作纪律）**：用户明确「下次代码编写完主动上传，
+    并主动根据 action 结果修改代码」⇒ 写完 + 静态复验通过即 **主动 commit / push**，
+    不再逐次请示上传；CI 结束后**主动判读 → 定位 → 修复 → 主动再上传**，循环到 CI 转绿。
+    旧规则「上传属对外动作需逐次确认」被覆盖；**成员互查规则仍有效**，本闭环按一次性豁免处理。
+  - **第 12 次 CI 裁决**：commit `6f96662`，run `43670088427`。core-ui job **全绿**
+    （含 Gate S7'）；rust job 在新增的 **Gate S14** 失败，Test / Gate S13 / build /
+    clippy / upload 全 skipped；package job 第四次 skipped。
+  - **真因 F —— Windows runner 的 Python stdout 编码（新）**：公开 annotations 给出
+    `UnicodeEncodeError: 'charmap' codec can't encode characters`，崩点在
+    `rust_module_layout_check.py` 的中文 `print(...)`，底层是
+    `Python\3.11.9\...\encodings\cp1252.py`。runner 默认 `cp1252`，中文判定理由
+    直接抛异常 ⇒ 门禁以「看起来失败」的方式崩溃。**本机中文环境全绿 ⇒ 本地绿不代表 CI 绿**；
+    且 Gate S13 的 5 个门禁同样有 2~9 行中文输出，只修 S14 会让第 13 次在 S13 原地再崩。
+  - **修法（全局根因）**：`build.yml` 顶层 `env` 加 `PYTHONIOENCODING: 'utf-8'` +
+    `PYTHONUTF8: '1'`，覆盖所有 python 调用；六个含中文输出的门禁脚本各加自包含
+    `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")`。
+    本地以 `PYTHONIOENCODING=cp1252` 复现崩溃，修复后六门禁在 cp1252 与正常环境下
+    全部 `EXIT=0`；S14 负控仍精确报 5 条 E0583。
+  - **新增环境事实**：以后凡新增打印中文的门禁脚本，必须沿用这套 UTF-8 加固；
+    本地复验须额外跑一次 `PYTHONIOENCODING=cp1252` 模拟 runner。
+  - **仍未验证**：`cargo test` 及其后所有步骤从未在 CI 跑到；`zsdesk-coreui` 5 个模块
+    首次被 rustc 编译可能暴露下一批类型 / 借用错误。待第 13 次 CI 逐层回答。

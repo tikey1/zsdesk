@@ -19,8 +19,11 @@ Gate S7' 也转绿 ⇒ M0 的最大未知已消除。
 5 个 `mod` 声明找不到模块文件（`error[E0583]`）—— 这个 crate 此前从未被
 rustc 编译过。详见 §0.3。
 
-2026-11-15 已按第 11 次 CI 返回的报错修好模块布局并加门禁，**这批修复尚未推送，
-待第 12 次 CI**；`package` job 至今仍被上游失败连带跳过，**从未真正执行**。
+2026-11-15 已按第 11 次 CI 返回的报错修好模块布局并加门禁，并以 `6f96662` 推送 ⇒
+**第 12 次 CI**（run `43670088427`）core-ui 依然全绿，但新增的 Gate S14 因
+**Windows `cp1252` 编码**崩溃（见 §0.4），`cargo test` 仍未跑到。
+本轮已修编码并按用户新规矩主动上传，待第 13 次 CI；
+`package` job 至今仍被上游失败连带跳过，**从未真正执行**。
 
 ---
 
@@ -110,6 +113,43 @@ tomllib 复验：127 包 / 有序 / 零歧义引用 / 零悬空引用。
 
 ---
 
+## 0.4 第 12 次 CI（run `43670088427`，commit `6f96662`）实测结果
+
+| job | 步骤名 | 结果 | 结论 |
+|---|---|---|---|
+| core-ui | 全部（含 Gate S7'） | **success** | C++ 源码构建第四次成功，S7' 保持转绿 |
+| Rust | Gate S14 — Rust module layout (pre-compile) | **failure** | 新门禁自己崩了，见下方真因 E |
+| Rust | Test / Gate S13 / Build / Clippy / Upload | skipped | S14 失败即跳过后续 |
+| package | 全部 | skipped | `needs` 未满足，第四次跳过 |
+
+**真因 E —— Windows runner 的 Python stdout 编码**：公开 annotations 给出完整 traceback：
+```
+UnicodeEncodeError: 'charmap' codec can't encode characters
+File "...\rust_module_layout_check.py", line 181, in main
+  print(f"检查 {len(roots)} 个 crate root，递归覆盖 ...")
+File "...\Python\3.11.9\x64\Lib\encodings\cp1252.py", line 19, in encode
+```
+runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛异常 ⇒ 门禁以
+「看起来失败」的方式崩溃。**本机是中文环境，同一批脚本本地全绿 ⇒ 本地绿不代表 CI 绿。**
+更关键的是：Gate S13 的 5 个门禁脚本同样打印中文（实测 2~9 行不等），
+此前从未跑到；只修 S14 的话，第 13 次 CI 会在 Gate S13 原地再崩一次。
+
+**修法（全局根因，不是绕过）**：
+1. `build.yml` 顶层 `env` 钉 `PYTHONIOENCODING: 'utf-8'` + `PYTHONUTF8: '1'`，
+   一次覆盖所有 `python` 调用、六个门禁脚本与未来新增门禁；
+2. 六个含中文输出的门禁脚本各加一段自包含的
+   `sys.stdout/stderr.reconfigure(encoding="utf-8", errors="replace")`，
+   保证脱离 workflow 单独运行也不崩。
+
+**本地验证**：用 `PYTHONIOENCODING=cp1252` 复现了 S14 与 `theme_contrast_check` 的崩溃；
+修复后六个门禁在 cp1252 与正常环境下**全部 `EXIT=0`**；S14 去掉 `#[path]` 的负控
+仍精确报 5 条 E0583；YAML / 22 个 pwsh 块语法 / 3.9 兼容 / `git diff --check` 全绿。
+
+**仍未验证**：`cargo test` 及其后所有步骤从未在 CI 跑到；`zsdesk-coreui` 5 个模块
+首次被 rustc 编译可能暴露下一批类型 / 借用错误。只能由第 13 次 CI 逐层回答。
+
+---
+
 ## 1. 已写入磁盘的改动与静态复核记录
 
 > **口径（2026-11-15 更新）**：本表混合三类条目，逐行带标签 ——
@@ -143,15 +183,17 @@ tomllib 复验：127 包 / 有序 / 零歧义引用 / 零悬空引用。
 | package job 失败可见性 | `.github/workflows/build.yml` | **【已于 aa7e9b5 推送】** 5 个可失败步骤各加 `::error::` 捕获 + job 级兜底定位；YAML 解析通过、21 个 pwsh 块语法解析 0 错误 |
 | **Rust 模块布局修复（第 11 次 CI 真因）** | `crates/zsdesk-coreui/src/lib.rs` | **【2026-11-15 本轮，未推送】** 5 条 `mod` 声明各加 `#[path = "lib/xxx.rs"]`，消除 E0583；不搬文件以保留全仓 7 份文档的 `src/lib/*.rs` 引用。已静态核对所有 `pub use` 名字、`StartupReport` 字段与 `RevisionStamp` 变体均对得上；**本机无 cargo，类型检查只能由第 12 次 CI 回答** |
 | **S14 Rust 模块布局门禁** | `scripts/gates/rust_module_layout_check.py` + `.github/workflows/build.yml` | **【2026-11-15 本轮，未推送】** 机械复现 Rust 模块文件解析规则，接在 `cargo test` **之前**（rust job 10 → 11 步），失败原因 emit `::error::`。正常态覆盖 6 个 crate root / 127 个 `.rs` 文件 EXIT=0；负控①去掉 `#[path]` → 精确报出第 11 次 CI 的那 5 个 E0583；负控②保留 `#[path]` 抽掉 `theme.rs` → 精确点名 theme |
-| 决策台账 D17–D20、第十三 / 十四 / 十五轮 | `DECISIONS.md` | — |
+| **Windows cp1252 编码修复（第 12 次 CI 真因）** | `.github/workflows/build.yml` + `scripts/gates/{qa_uix_verify,rust_module_layout_check,s13_token_namespace_check,theme_contrast_check,ui_id_manifest_check,uix_tag_check}.py` | **【2026-11-15 本轮，按新规矩主动推送】** 顶层 `env` 钉 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`；六脚本各加 stdout/stderr UTF-8 自包含加固。`PYTHONIOENCODING=cp1252` 下修复前后对照：S14 与 `theme_contrast_check` 由 `EXIT=1` 变 `EXIT=0`，六个门禁全部通过；负控仍报 5 条 E0583 |
+| 决策台账 D17–D20、第十三 / 十四 / 十五 / 十六轮 | `DECISIONS.md` | — |
 
 ---
 
-## 2. 待第 12 次 CI 复验的事项
+## 2. 待第 13 次 CI 复验的事项
 
-> 第 11 次 CI（run `43666238286`）已把 core-ui 构建、G2、S7、**Gate S7'** 全部跑绿；
-> 同时暴露出新的 Rust 模块布局真因（§0.3），已在本轮修复。
-> 下面各小节保留当时的分析过程；**最新状态以本表为准**：
+> 第 12 次 CI（run `43670088427`）core-ui 仍全绿，但新增的 Gate S14 因 Windows
+> `cp1252` 编码崩溃（§0.4），`cargo test` 及其后所有步骤**仍未跑到**。
+> 本轮已全局修编码并主动推送。下面各小节保留当时的分析过程；
+> **最新状态以本表为准**：
 
 | 小节 | 第 11 次 CI 的裁决 | 现在状态 |
 |---|---|---|
@@ -160,7 +202,8 @@ tomllib 复验：127 包 / 有序 / 零歧义引用 / 零悬空引用。
 | §2.1c Gate S7' 路径 | **Gate S7' = success** ⇒ `$env:GITHUB_WORKSPACE` 修复有效 | ✅ 关闭 |
 | §2.4 五个 S13 门禁在 CI 首次执行 | 仍被 Test 失败跳过 | ⏳ 待第 12 次 CI |
 | `cargo build` / package job / `probe.rs` 编译 | 仍被跳过 | ⏳ 待第 12 次 CI |
-| **新增：Rust 5 个模块文件首次被 rustc 编译** | 第 11 次止步于 E0583，模块内容从未编译 | ⏳ **最大未知**，待第 12 次 CI |
+| **新增：Gate S14 / 五个 S13 门禁在 CI 首次执行** | 第 12 次止步于 S14 的 `cp1252` 编码崩溃 | ⏳ 待第 13 次 CI（编码已全局修复，本地 cp1252 复验通过） |
+| **新增：Rust 5 个模块文件首次被 rustc 编译** | 前 12 次都止步于更早环节，模块内容从未编译 | ⏳ **最大未知**，待第 13 次 CI |
 
 > 本机**无 cargo / rustc** 且缺 `zsui` path 依赖 ⇒ 静态复核不能替代编译。
 > 修完 E0583 后才轮到类型 / 借用检查，第 12 次 CI 仍可能暴露下一批编译错误。

@@ -153,8 +153,13 @@ CI 上的雷点：① `GIT_SHALLOW` + tag 的浅克隆；② quickjs 的子模�
 
 ## 6. 已验证 / 未验证分界
 
-> 以第 11 次 CI（run `43666238286`，commit `aa7e9b5`）为止的实测为准；
-> **第 12 次 CI 尚未触发**。
+> 以第 12 次 CI（run `43670088427`，commit `6f96662`）为止的实测为准；
+> **第 13 次 CI 尚未触发**。
+>
+> 第 12 次新增失败模式：Windows runner 的 Python stdout 默认 `cp1252`，
+> 门禁打印中文会抛 `UnicodeEncodeError`。已在顶层 `env` 钉
+> `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`，六个门禁脚本另带自包含加固。
+> **本机中文环境复验全绿不代表 CI 绿**，本地须额外用 `PYTHONIOENCODING=cp1252` 模拟。
 
 | 环节 | 状态 | 证据 |
 |---|---|---|
@@ -165,10 +170,11 @@ CI 上的雷点：① `GIT_SHALLOW` + tag 的浅克隆；② quickjs 的子模�
 | `core-ui.dll` 的 x64 断言 / Gate G2 / Gate S7 | ✅ 三次全绿 | 同上 |
 | **Gate S7' 对 CI 内 DLL 的导出面比对** | ✅ **第 11 次 CI = success** | `$env:GITHUB_WORKSPACE` + `Join-Path` 修复经真实 CI 证实；本机 346 DLL 的结论已在 CI 编出的 345 DLL 上实测确认 |
 | `Cargo.lock` 与 workspace 一致性 | ✅ **第 11 次 CI 越过 `--locked`** | Test 未再报锁文件漂移，`cargo metadata` 自诊断分支也未触发 |
-| `cargo test --workspace --release --locked` | ❌ **三次失败** | 第 9/10 次 = 锁文件（已关闭）；**第 11 次 = `zsdesk-coreui` 5 个 `mod` 声明 E0583**，已加 `#[path]` 修复，**待第 12 次 CI** |
-| `zsdesk-coreui` 5 个模块文件的编译 | ⏳ **从未被 rustc 编译** | 前 11 次 CI 都在更早环节失败；修完 E0583 后才轮到类型 / 借用检查 |
-| 五个 S13 门禁 / 新 S14 门禁 / `cargo build` / clippy | ⏳ **从未在 CI 跑到** | Test 失败即跳过后续步骤 |
-| Gate S12 / 收 CRT / smoke-probe / 便携 ZIP / `manifest.sha256` / 上传 | ⏳ **从未真正执行** | package job 三次均被上游失败连带 skipped |
+| `cargo test --workspace --release --locked` | ❌ **三次失败 + 第四次未跑到** | 第 9/10 次 = 锁文件（已关闭）；第 11 次 = E0583（已加 `#[path]` 修复）；**第 12 次被 S14 失败连带跳过**，待第 13 次 CI |
+| `zsdesk-coreui` 5 个模块文件的编译 | ⏳ **从未被 rustc 编译** | 前 12 次 CI 都在更早环节失败；修完 E0583 后才轮到类型 / 借用检查 |
+| 新 S14 Rust 模块布局门禁 | ❌ 第 12 次 CI 首次执行即失败 | 真因 = `cp1252` 编码崩溃（已全局修复）；本地 `PYTHONIOENCODING=cp1252` 复验通过 |
+| 五个 S13 门禁 / `cargo build` / clippy | ⏳ **从未在 CI 跑到** | 第 12 次 S14 失败即跳过后续；这五个脚本同样打印中文，已一并加 UTF-8 加固 |
+| Gate S12 / 收 CRT / smoke-probe / 便携 ZIP / `manifest.sha256` / 上传 | ⏳ **从未真正执行** | package job 四次均被上游失败连带 skipped |
 | `probe.rs` 的类型检查 / 借用检查 / 实际运行 | ⏳ **从未编译** | 本机无 cargo/rustc，只能由 CI 回答 |
 | 失败原因的公开可见性（D23） | ✅ 第 10 / 11 次 CI 已证明有效 | `::error::` annotations 先后定位「两个真因」与「5 条 E0583」；package job 的补齐仍**未经 CI 验证** |
 
