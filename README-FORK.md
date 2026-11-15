@@ -2,8 +2,21 @@
 
 这是 [`qiu7824/zsdesk`](https://github.com/qiu7824/zsdesk) v0.3.11 的 fork，用于把 UI 从 ZSUI 迁移到 Core UI、把图片预览与 GuoheView 强关联，并采用 Windows 10 / WinUI 3 / Fluent 风格。
 
-> 当前处于 **P0**：已完成 fork、只读调研、UI 设计代码同步与路线图，**尚未改动任何 Rust 业务代码**。
-> 完整现状、冲突清单与分阶段计划见 [`docs/10-FORK-ROADMAP-COREUI.md`](docs/10-FORK-ROADMAP-COREUI.md)。
+> **当前状态（2026-11-15）**：M0 验收闭环已达成 —— **第 15 次 CI**（run `43673089804`，
+> commit `63685f9`）三个 job 全部 `success`：`cargo test --workspace --release --locked`、
+> `cargo build`、Gate S13 / S14 / S7'、core-ui 源码构建、smoke-probe 与便携 ZIP 打包全部通过，
+> 产出 `ZSDesk-full-x64`（4,941,625 B ≈ 4.71 MiB）。详见 `PROJECT_STATE.md` 与 `docs/ci.md` §6。
+>
+> **已知限制（如实披露）**：
+> ① Rust 侧目前是 FFI 绑定层 + 冒烟探针，**全量业务功能（M1）尚未装配**；
+>    ZIP 里的 exe 跑通的是构建链路，不是功能完整的成品。
+> ② 界面**未在真机渲染验收** —— `docs/13-UIX-FIRST-RENDER-CHECKLIST.md` 清单尚未执行；
+>    32 个句柄是否全部取到、`:root` 注入是否被 core-ui 先定义者吃掉，仍需人工核对。
+> ③ 目前只有 Actions artifact（默认 90 天过期），**尚无 Release 永久分发**；
+>    Inno Setup 安装包（`packaging/windows/zsdesk.iss`）也未接进 CI 编译。
+>
+> 完整现状、冲突清单与分阶段计划见 [`docs/10-FORK-ROADMAP-COREUI.md`](docs/10-FORK-ROADMAP-COREUI.md)；
+> 剩余工作快照见 `docs/15-REMAINING-WORK.md`。
 
 ## 目录增补（相对上游）
 
@@ -14,7 +27,9 @@
 | `assets/*.uix`、`assets/themes.json` | 静态布局与主题 token（遵守 D-15：只声明布局 / 样式 / token，无事件属性、无业务脚本） |
 | `README-FORK.md` | 本文件 |
 
-这些文件不参与 `cargo build`（未加入任何 crate 的 `include`），不影响上游既有 CI。
+这些 `.uix` / 主题资产不参与 `cargo build`（未加入任何 crate 的 `include`）；
+但**本 fork 已重写 `.github/workflows/build.yml`**（三 job：rust / core-ui / package），
+当前 CI 实况见 `docs/ci.md`，不再沿用上游既有 CI 的行为。
 
 ## 上游基线
 

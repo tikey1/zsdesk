@@ -38,42 +38,46 @@ core-ui  ──┘
 
 ## 2. 步骤明细
 
-> 验证状态以 **run `43666238286`（第 11 次 CI，commit `aa7e9b5`）** 为准；
-> 「已实跑」= 在真实 CI 执行过，**不等同于通过**。标 ⏳ 的仍无真实结论。
+> 验证状态以 **run `43673089804`（第 15 次 CI，commit `63685f9`）** 为准。
+> **三个 job 全部 `success`**，下表每个步骤都在真实 CI 执行并通过；
+> 唯一标记为 `skipped` 的是条件步骤 `Package job failure locator`（job 成功时不执行，**属预期**）。
+> 第 9~14 次的失败链与逐轮修复见 §6、`docs/15` §0.1~§0.6、`DECISIONS.md` 第十五~十八轮。
 
-### job `rust`（11 步）
-| 步骤 | 作用 | 验证状态 |
+### job `rust`（11 步，全部 success）
+| 步骤 | 作用 | 第 15 次 CI |
 |---|---|---|
-| checkout → `path: app` + 读 pin + checkout `zsui` → `path: zsui` | 满足 `../../../zsui` path 依赖（MPL-2.0） | ✅ 已实跑 |
-| `setup-python@v5`（3.11）+ `dtolnay/rust-toolchain@1.99.0` | 钉版本（D22） | ✅ 已实跑 |
-| **Gate S14 — Rust module layout (pre-compile)** | 编译前机械复核 `mod` 声明 → 文件映射，提前拦 `error[E0583]` | 🆕 2026-11-15 新增、**未经 CI 验证**；本地正常态覆盖 6 crate root / 127 文件，两组负控精确命中 |
-| `cargo test --workspace --release --locked` | 全量测试 | ❌ **第 9 / 10 / 11 次均失败**：第 9/10 次真因 = `Cargo.lock` 不同步（第 11 次已越过、`--locked` 不再报错）；**第 11 次真因 = `zsdesk-coreui` 5 个模块 `error[E0583]`**，已加 `#[path]` 修复，**待第 12 次 CI** |
-| Gate S13（5 个门禁） | 标签 / token 命名空间 / id 清单 / 对比度 / 间距 | ⏳ **从未跑到**（Test 失败即跳过后续） |
-| `cargo build --locked --release -p zsdesk-app` | 构建 full | ⏳ 从未跑到 |
-| `cargo clippy` | 静态检查，**不阻断** | ⏳ 从未跑到 |
-| upload artifact | 传 exe 给 package job | ⏳ 从未跑到 |
+| checkout `app` + 读 pin + checkout `zsui` | 满足 `../../../zsui` path 依赖（MPL-2.0） | ✅ |
+| `setup-python@v5`（3.11）+ `dtolnay/rust-toolchain@1.99.0` | 钉版本（D22） | ✅ |
+| **Gate S14 — Rust module layout (pre-compile)** | 编译前机械复核 `mod` 声明 → 文件映射，提前拦 `error[E0583]` | ✅ 第 13 次起连续通过（第 12 次因 `cp1252` 崩溃，已全局修 UTF-8） |
+| **`cargo test --workspace --release --locked`** | 全量测试（含 13 个单元测试与 doctest） | ✅ **第 15 次首次通过**；此前第 9/10 次锁文件漂移、第 11 次 E0583、第 13 次 5 个类型/借用错误、第 14 次 `probe.rs` E0308 |
+| **Gate S13**（5 个门禁） | 标签 / token 命名空间 / id 清单 / 对比度 / 间距 | ✅ 第 13 次起连续通过 |
+| `cargo build --locked --release -p zsdesk-app` | 构建 full edition | ✅ **第 15 次首次执行并通过** |
+| `cargo clippy`（advisory） | 静态检查，**不阻断** | ✅ 第 15 次首次执行并通过 |
+| Upload the executable | 传 exe 给 package job | ✅ 产出 `zsdesk-app-full-x64` 2,358,072 B |
 
-### job `core-ui`（16 步）
-| 步骤 | 作用 | 验证状态 |
+### job `core-ui`（16 步，全部 success）
+| 步骤 | 作用 | 第 15 次 CI |
 |---|---|---|
-| checkout + Locate clang-cl/llvm-rc + Ensure Ninja + Pre-fetch QuickJS-NG | 工具链准备 | ✅ 第 9 / 10 次均成功 |
-| Configure and build core-ui from source | 调上游 `scripts/build-clang-cl.ps1 -Target core-ui` | ✅ **连续两次 success**，日志 3057 行完整落盘 |
-| Verify x86-64 / Gate G2 / Gate S7 | PE 位数 / revision 戳记 / 动态 CRT | ✅ 三次全绿 |
-| **Gate S7'** | DLL 导出面 vs 同 checkout `src/` 的 `UI_API` 定义集 | ❌ 两次失败；真因 = `${{ env.GITHUB_WORKSPACE }}` 求值为空，已改用 `$env:GITHUB_WORKSPACE` + `Join-Path`，**待复验** |
-| upload artifact | 传 dll 给 package job | ✅ 已实跑 |
+| checkout + Locate clang-cl/llvm-rc + Ensure Ninja + Pre-fetch QuickJS-NG | 工具链准备 | ✅ 第 9 次起连续成功 |
+| Configure and build core-ui from source | 调上游 `scripts/build-clang-cl.ps1 -Target core-ui` | ✅ 第 9 次起连续 success，日志 3057 行完整落盘 |
+| Verify x86-64 / Gate G2 / Gate S7 | PE 位数 / revision 戳记 / 动态 CRT | ✅ 连续全绿 |
+| **Gate S7'** | DLL 导出面 vs 同 checkout `src/` 的 `UI_API` 定义集 | ✅ 第 11 次起连续 success（修 `${{ env.GITHUB_WORKSPACE }}` 空值 → `$env:GITHUB_WORKSPACE` + `Join-Path`） |
+| Upload core-ui.dll | 传 DLL 给 package job | ✅ 产出 `core-ui-x64` 1,981,859 B + `core-ui-build-log` 22,423 B |
 
-### job `package`（13 步）
-| 步骤 | 作用 | 验证状态 |
+### job `package`（13 步，**第 15 次首次真正执行**）
+| 步骤 | 作用 | 第 15 次 CI |
 |---|---|---|
-| checkout `app` + 读 pin + checkout `zsui` | 满足 workspace 整体解析（缺一不可） | ⏳ skipped（上游 job 失败连带） |
-| download 两个 artifact | exe 与 `core-ui.dll` | ⏳ skipped |
-| **Gate S12** | `core-ui.dll` 与 exe 同目录 | ⏳ 未跑到 |
-| Collect VC++ x64 CRT | vswhere → `VC\Redist\MSVC\<ver>\x64\Microsoft.VC*.CRT` | ⏳ 未跑到 |
-| **Build the core-ui smoke probe** | `cargo build -p zsdesk-coreui --example probe` | ⏳ 未跑到；**`probe.rs` 从未被 rustc 编译过**，是最大未知 |
-| **Smoke-probe** | 用真实 DLL + `assets/main.uix` 跑 U01~U03 + `:root` 注入（U04） | ⏳ 未跑到 |
-| Package ZIP | exe + DLL + 戳记校验 + `assets/` 四件套 + 3 个 CRT + LICENSE + `manifest.sha256` | ⏳ 未跑到 |
-| Upload `ZSDesk-full-x64` | ZIP artifact | ⏳ 未跑到 |
-| **Package job failure locator** | job 失败时把失败步骤名 emit 成 `::error::` | 🆕 2026-11-14 新增，**未经 CI 验证** |
+| checkout `app` + 读 pin + checkout `zsui` | 满足 workspace 整体解析（缺一不可） | ✅ 首次执行（前六次均被上游失败连带 skipped） |
+| download 两个 artifact | exe 与 `core-ui.dll` | ✅ |
+| **Gate S12** | `core-ui.dll` 与 exe 同目录 | ✅ 首次通过 |
+| Collect VC++ x64 CRT | vswhere → `VC\Redist\MSVC\<ver>\x64\Microsoft.VC*.CRT` | ✅ 首次通过 |
+| **Build the core-ui smoke probe** | `cargo build -p zsdesk-coreui --example probe` | ✅ **`probe.rs` 首次被 rustc 编译通过** |
+| **Smoke-probe** | 真实 DLL + 真实 `.uix` 资产跑 U01~U04（含 `:root` 注入） | ✅ 首次执行，退出码 0（此前最大未知已消除） |
+| Package the portable x64 zip | exe + DLL + 戳记校验 + `assets/` 四件套 + 3 个 CRT + LICENSE + `manifest.sha256` | ✅ 首次通过 |
+| Upload `ZSDesk-full-x64` | ZIP artifact | ✅ **4,941,625 B ≈ 4.71 MiB**，未触 10 MB 红线 |
+| **Package job failure locator** | job 失败时把失败步骤名 emit 成 `::error::` | `skipped` —— 条件步骤，job 成功时不执行，**预期行为**；其 `::error::` 捕获逻辑在第 15 次未触发，故仍无失败场景实测 |
+
+> 第 15 次 CI 共 4 个 artifact，全部 `expired: false`：`ZSDesk-full-x64`、`zsdesk-app-full-x64`、`core-ui-x64`、`core-ui-build-log`。
 
 ---
 
@@ -153,32 +157,41 @@ CI 上的雷点：① `GIT_SHALLOW` + tag 的浅克隆；② quickjs 的子模�
 
 ## 6. 已验证 / 未验证分界
 
-> 以第 14 次 CI（run `43672643005`，commit `33aca13`）为止的实测为准；
-> **第 15 次 CI 尚未触发**。第 13 次 cp1252 修复生效：Gate S14 与五个 S13 门禁
-> **首次在 CI 执行并全部通过**；第 13 次的 5 个编译错误已修复、第 14 次全部消失，
-> 只剩 `probe.rs` 的 1 个 `E0308`（已修，见 `docs/15` §0.5 / §0.6）。
+> 当前基线 = **第 15 次 CI（run `43673089804`，commit `63685f9`）三个 job 全绿**。
+> 判读方式是 `GET /actions/runs/43673089804/jobs?per_page=100` **逐 step 核对**
+> + `GET /actions/runs/43673089804/artifacts` 核实产物，**不只看 run 的 `conclusion`**。
 >
-> 第 12 次新增失败模式：Windows runner 的 Python stdout 默认 `cp1252`，
-> 门禁打印中文会抛 `UnicodeEncodeError`。已在顶层 `env` 钉
-> `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`，六个门禁脚本另带自包含加固。
-> **本机中文环境复验全绿不代表 CI 绿**，本地须额外用 `PYTHONIOENCODING=cp1252` 模拟。
+> 第 9~14 次的失败链已全部关闭：日志管道被 PowerShell 中断 → `Cargo.lock` 漂移 /
+> `${{ env.GITHUB_WORKSPACE }}` 空值 → `E0583` 模块布局 → Windows `cp1252` 编码崩溃 →
+> 5 个 Rust 类型/借用错误 → `probe.rs` 的 `Cow<str>`/`String` 类型不符。
+> 逐轮真因与修法见 `docs/15` §0.1~§0.7 与 `DECISIONS.md` 第十五~十九轮。
+>
+> **仍有效的教训**：Windows runner 的 Python stdout 默认 `cp1252`，门禁打印中文会抛
+> `UnicodeEncodeError`；顶层 `env` 已钉 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`，
+> 六个门禁脚本另带自包含加固。**本机中文环境复验全绿不代表 CI 绿**，
+> 本地须额外用 `PYTHONIOENCODING=cp1252` 模拟。
 
 | 环节 | 状态 | 证据 |
 |---|---|---|
 | fork 的基线 CI（commit `4a48349`，`Windows build #1`，9m58s） | ✅ 通过 | **上游基线**，尚未接入 core-ui；不代表当前项目 |
-| checkout / 工具链 / `zsui` 同级检出 | ✅ 已实跑 | run `43398079661` / `43545192012` / `43666238286` |
+| checkout / 工具链 / `zsui` 同级检出 | ✅ 已实跑 | run `43673089804` 三个 job 全部通过 |
 | clang-cl + llvm-rc + Ninja + QuickJS-NG 预置 | ✅ 已实跑成功 | 同上 |
-| **core-ui 从源码构建** | ✅ **第 9 / 10 / 11 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
-| `core-ui.dll` 的 x64 断言 / Gate G2 / Gate S7 | ✅ 三次全绿 | 同上 |
-| **Gate S7' 对 CI 内 DLL 的导出面比对** | ✅ **第 11 次 CI = success** | `$env:GITHUB_WORKSPACE` + `Join-Path` 修复经真实 CI 证实；本机 346 DLL 的结论已在 CI 编出的 345 DLL 上实测确认 |
-| `Cargo.lock` 与 workspace 一致性 | ✅ **第 11 次 CI 越过 `--locked`** | Test 未再报锁文件漂移，`cargo metadata` 自诊断分支也未触发 |
-| `cargo test --workspace --release --locked` | ❌ **三次失败 + 第四次未跑到** | 第 9/10 次 = 锁文件（已关闭）；第 11 次 = E0583（已加 `#[path]` 修复）；**第 12 次被 S14 失败连带跳过**，待第 13 次 CI |
-| `zsdesk-coreui` 5 个模块文件的编译 | ⏳ **从未被 rustc 编译** | 前 12 次 CI 都在更早环节失败；修完 E0583 后才轮到类型 / 借用检查 |
-| 新 S14 Rust 模块布局门禁 | ❌ 第 12 次 CI 首次执行即失败 | 真因 = `cp1252` 编码崩溃（已全局修复）；本地 `PYTHONIOENCODING=cp1252` 复验通过 |
-| 五个 S13 门禁 / `cargo build` / clippy | ⏳ **从未在 CI 跑到** | 第 12 次 S14 失败即跳过后续；这五个脚本同样打印中文，已一并加 UTF-8 加固 |
-| Gate S12 / 收 CRT / smoke-probe / 便携 ZIP / `manifest.sha256` / 上传 | ⏳ **从未真正执行** | package job 四次均被上游失败连带 skipped |
-| `probe.rs` 的类型检查 / 借用检查 / 实际运行 | ⏳ **从未编译** | 本机无 cargo/rustc，只能由 CI 回答 |
-| 失败原因的公开可见性（D23） | ✅ 第 10 / 11 次 CI 已证明有效 | `::error::` annotations 先后定位「两个真因」与「5 条 E0583」；package job 的补齐仍**未经 CI 验证** |
+| **core-ui 从源码构建** | ✅ **第 9~15 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
+| `core-ui.dll` 的 x64 断言 / Gate G2 / Gate S7 | ✅ 连续全绿 | run `43673089804` core-ui job step 13/14/15 |
+| **Gate S7' 对 CI 内 DLL 的导出面比对** | ✅ 第 11 次起连续 success | `$env:GITHUB_WORKSPACE` + `Join-Path` 修复经真实 CI 证实 |
+| `Cargo.lock` 与 workspace 一致性 | ✅ 越过 `--locked` | 第 11 次不再报锁文件漂移；第 15 次 `cargo test --locked` 直接通过 |
+| **`cargo test --workspace --release --locked`** | ✅ **第 15 次首次通过（含 doctest 与 13 个单元测试）** | rust job step 8 = `success` |
+| `zsdesk-coreui` 5 个模块文件的编译 | ✅ 第 13 次首次被 rustc 编译、第 15 次全通过 | 类型 / 借用检查结论已由 CI 给出，不再是「未验证」 |
+| Gate S14 / 五个 S13 门禁 | ✅ 第 13 次首次执行、第 15 次全通过 | rust job step 7 / step 9 |
+| `cargo build` / clippy / upload exe | ✅ 第 15 次首次执行并通过 | rust job step 10 / 11 / 12 |
+| Gate S12 / 收 VC++ x64 CRT / smoke-probe **编译** | ✅ 第 15 次首次执行并通过 | package job step 7 / 8 / 10；`probe.rs` 首次被 rustc 编译 |
+| **`probe.rs` 实际运行（U01~U04，含 `:root` 注入）** | ✅ 第 15 次首次执行、退出码 0 | package job step 11 = `success` |
+| 便携 ZIP / `manifest.sha256` / 上传 | ✅ 第 15 次首次产出 | `ZSDesk-full-x64` 4,941,625 B，`expired: false` |
+| 失败原因的公开可见性（D23） | ✅ 第 10 / 11 / 13 / 14 次已证明有效 | `::error::` annotations 逐轮定位真因；annotation 带 `-Context 0,5` 后可直接拿到 `文件:行:列` |
+| **Package job failure locator 的失败分支** | ⏳ **未实测** | 第 15 次 job 成功 ⇒ 条件步骤 `skipped`；只有将来该 job 真失败时才能验证其 `::error::` 输出，不得写成「已验证」 |
+| **真机渲染 / 32 个句柄 / `:root` 视觉效果** | ⏳ **未验证** | CI 无 GUI 人工观感；`docs/13-UIX-FIRST-RENDER-CHECKLIST.md` 清单尚未执行 |
+| **Inno Setup 安装包编译** | ⏳ **未验证** | `packaging/windows/zsdesk.iss` 只修正了 `manifest.sha256` 文件名，未接进 CI |
+| **M1 全量业务功能** | ⏳ **未开始** | 当前 exe 是 FFI 绑定层 + 冒烟探针骨架，面板 / 导航树 / GuoheView 预览尚未接线 |
 
 ---
 

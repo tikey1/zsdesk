@@ -1072,4 +1072,32 @@ $PSNativeCommandUseErrorActionPreference = $false
   - **修法**：`probe.rs` 的 `String::from_utf8_lossy(...)` 加 `.into_owned()`，
     与 `if` 分支的 `String::new()` 统一为 `String`。
   - **仍未验证**：`cargo test` 全量（含 doctest）/ `cargo build` / package job /
-    `probe.rs` 实际运行。待第 15 次 CI。
+    `probe.rs` 实际运行。待第 15 次 CI。→ **已由下方第十九轮全部关闭**。
+- 2026-11-15 **第十九轮（第 15 次 CI 全绿 + 主动闭环达成）**：无新增用户决策。
+  - **第 15 次 CI**：commit `63685f9`，run `43673089804`，`conclusion=success`；
+    三个 job 的全部 step 逐条核对均为 `success`（`Package job failure locator`
+    按条件 `skipped`，属预期行为）。
+  - **首次达成的验证**：
+    ① `cargo test --workspace --release --locked` **转绿**（含 doctest 与 `theme.rs`
+    的 13 个单元测试）；
+    ② `cargo build --locked --release -p zsdesk-app` 与 clippy 首次执行并通过；
+    ③ **package job 首次真正执行**（前六次均被上游失败连带 skipped）：Gate S12、
+    收 VC++ x64 CRT、`probe.rs` 首次编译、真实 DLL + 真实 `.uix` 冒烟（U01~U04）、
+    便携 ZIP 打包与上传全部通过。
+  - **产物**：4 个 artifact 均 `expired: false` —— `ZSDesk-full-x64` 4,941,625 B、
+    `zsdesk-app-full-x64` 2,358,072 B、`core-ui-x64` 1,981,859 B、
+    `core-ui-build-log` 22,423 B。ZIP ≈ 4.71 MiB，**未触 10 MB 红线**，
+    `PROJECT_STATE.md` 的 Q1「暂不放宽」推荐项因此无需调整。
+  - **真因 I 已证实修复**：第 14 次唯一剩余的 `probe.rs:187` `E0308`
+    （`Cow<str>` vs `String`）由 `63685f9` 的 `.into_owned()` 消除。
+  - **闭环达成**：按 2026-11-15 用户裁定「代码编写完主动上传，主动根据 Action 结果
+    修改代码，循环到 CI 转绿」，第 11~15 次 CI 的「定位 → 修复 → 主动推送 → 判读」
+    闭环到此结束，**不再有 CI bug 待修**。
+  - **本轮状态回写**：`PROJECT_STATE.md` 重写为全绿基线（已完成表 / 风险 Top3 /
+    下一步 / 待决策同步）；`docs/ci.md` §2 步骤明细与 §6 已验证分界对齐实况；
+    `docs/15` 新增 §0.7 并把 §0 现状 / §1 口径 / §2 待验表全部收口；
+    `spec/ci-contract.md` 与 `spec/crate-layout.md` 的「CI 尚未调用」改为已在 CI 通过。
+  - **诚实边界（仍属未验证 / 未开始）**：`Package job failure locator` 的失败分支未触发；
+    真机渲染 / 32 个句柄 / `:root` 视觉、`docs/13` 首渲染清单、Inno Setup 安装包编译、
+    M1 全量业务功能与 Release 分发均未开始。**CI 全绿 ≠ 功能完整或界面正确**。
+  - **流程**：一次性互查豁免止于本闭环；后续开启新开发日须恢复「每天写码前成员互查」。

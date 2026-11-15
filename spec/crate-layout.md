@@ -394,8 +394,8 @@ accent=#3971EC source=default(library)
 | **S8** | **绑定面 vs 导出表** | 绑定层声明的符号 ⊆ S7 实测集合；必需∩可选=∅；必需不含 12 个「本机独有」符号 | 改绑定 | `python3 scripts/check-coreui-api.py` |
 | **S9** | **crate 依赖无环** | `cargo metadata` 解析出的依赖图有环 | 修正 | `python3 scripts/gates/check_crate_dag.py` |
 | **S10** | **FFI 层无业务依赖** | `zsdesk-coreui/Cargo.toml` 含指向业务 crate 的 path 依赖 | 修正 | 同上 |
-| **S13** | **token 不撞名** | 不得定义**库 token 全集 34 个**（含 `--accent`）；**`.uix`** 不得定义 `--app-accent`；**`themes.json` 允许** `--app-accent`（D14 的回退源值，Rust **不得**把它注入 `:root`）；`.uix` 不得 `var(--app-accent)` | 改资源 | ✅ 脚本已落地：`scripts/gates/s13_token_namespace_check.py --root .`（⏳ **CI 尚未调用**，见 `spec/ci-contract.md` §4.8） |
-| **id 清单** | **期望 id 集合 == `.uix` 实际 id 集合**（含逐页条数 + 同页重 id） | 资产加 id 而清单没同步 → Rust 漏取句柄 → **静默不刷新**（不报错）。期望集放在 `assets/ui-ids.json` | 改资产或改清单 | ✅ 脚本已落地：`scripts/gates/ui_id_manifest_check.py --root .`（⏳ CI 尚未调用） |
+| **S13** | **token 不撞名** | 不得定义**库 token 全集 34 个**（含 `--accent`）；**`.uix`** 不得定义 `--app-accent`；**`themes.json` 允许** `--app-accent`（D14 的回退源值，Rust **不得**把它注入 `:root`）；`.uix` 不得 `var(--app-accent)` | 改资源 | ✅ 脚本已落地：`scripts/gates/s13_token_namespace_check.py --root .`（✅ **已在 CI 执行并通过**：Gate S13 第 13 次首次执行、第 15 次三个 job 全绿，见 `docs/ci.md` §6） |
+| **id 清单** | **期望 id 集合 == `.uix` 实际 id 集合**（含逐页条数 + 同页重 id） | 资产加 id 而清单没同步 → Rust 漏取句柄 → **静默不刷新**（不报错）。期望集放在 `assets/ui-ids.json` | 改资产或改清单 | ✅ 脚本已落地：`scripts/gates/ui_id_manifest_check.py --root .`（✅ **已在 CI 执行并通过**：第 13 次首次、第 15 次全绿，见 `docs/ci.md` §6） |
 
 **首次基线**：Phase 3 开工前跑 `python3 scripts/gates/verify.py --phase 3`，
 把结果落盘。**没有基线，后面「改坏了」无法判定。**

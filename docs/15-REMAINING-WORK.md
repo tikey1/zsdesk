@@ -1,29 +1,32 @@
-# 剩余工作流程（2026-11-13 收尾快照）
+# 剩余工作流程（2026-11-13 收尾快照 / 2026-11-15 闭环更新）
 
-> 本文件记录**代码停止编写时**的未完成事项。
-> 上一次已推送到 GitHub 的状态见 §1；本轮新增但**尚未验证**的改动见 §2；
+> 本文件原记录**代码停止编写时**的未完成事项。
+> 已推送状态见 §1；CI 复验事项（**现已全部关闭**）见 §2；
 > 后续里程碑见 §3；已知的判断与风险见 §4。
+> **当前状态以 §0.7 与 `PROJECT_STATE.md` / `docs/ci.md` §6 为准**；§0.1~§0.6 是逐轮历史快照。
 
 ---
 
 ## 0. 一句话现状
 
-Rust 侧的 core-ui 绑定层（`crates/zsdesk-coreui/`）与 CI 契约已经落地，
-`scripts/gates/` 共 8 个脚本（7 个独立门禁 + 1 个 PE 解析辅助库；2026-11-15 新增 S14 Rust 模块布局门禁并接进 CI）；
-**core-ui 的 C++ 源码构建连续三次（第 9 / 10 / 11 次 CI）成功**，第 11 次连
-Gate S7' 也转绿 ⇒ M0 的最大未知已消除。
+**2026-11-15 第 15 次 CI（run `43673089804`，commit `63685f9`）三个 job 全部 `success`
+—— M0「可由 GitHub Actions 编译并打包出可运行程序」的验收闭环达成，
+本文件原先记录的「剩余 CI 验证事项」已全部关闭。**
 
-第 10 次 CI 靠 `::error::` 探针定位的两处真因（`Cargo.lock` 不同步 /
-`env.GITHUB_WORKSPACE` 空值）已在 `aa7e9b5` 修复并推送，第 11 次 CI 证实有效。
-**但第 11 次 CI 的 rust job 又在 Test 失败**：真因是 `zsdesk-coreui` 的
-5 个 `mod` 声明找不到模块文件（`error[E0583]`）—— 这个 crate 此前从未被
-rustc 编译过。详见 §0.3。
-
-2026-11-15 已按第 11 次 CI 返回的报错修好模块布局并加门禁，并以 `6f96662` 推送 ⇒
-**第 12 次 CI**（run `43670088427`）core-ui 依然全绿，但新增的 Gate S14 因
-**Windows `cp1252` 编码**崩溃（见 §0.4），`cargo test` 仍未跑到。
-本轮已修编码并按用户新规矩主动上传，待第 13 次 CI；
-`package` job 至今仍被上游失败连带跳过，**从未真正执行**。
+- Rust 侧 core-ui 绑定层（`crates/zsdesk-coreui/`）、CI 契约、界面资产与
+  `scripts/gates/` 共 8 个脚本（7 个独立门禁含 S14 + 1 个 PE 解析辅助库）均已落地，并经真实 CI 验证。
+- **第 15 次 CI 首次跑通**：`cargo test --workspace --release --locked`
+  （含 doctest 与 `theme.rs` 的 13 个单元测试）、`cargo build`、clippy，
+  以及 **package job 全链路**（Gate S12 / 收 VC++ x64 CRT / smoke probe 首次编译 /
+  真实 DLL + 真实 `.uix` 冒烟 / 便携 ZIP 打包与上传）。该 job 此前六次均被上游失败连带 skipped。
+- **4 个有效 artifact**（`expired: false`）：`ZSDesk-full-x64` 4,941,625 B、
+  `zsdesk-app-full-x64` 2,358,072 B、`core-ui-x64` 1,981,859 B、`core-ui-build-log` 22,423 B。
+- 第 9~14 次的逐轮失败链与修法见 §0.1~§0.6；第 15 次收口见 §0.7。
+- §1 的表格是**历史静态复核记录**，其中「未推送 / 未编译」是写入当时的标签，
+  **不代表当前状态**：这些改动已随 `aa7e9b5` / `6f96662` / `16066e6` / `33aca13` / `63685f9`
+  依次推送，并由第 11~15 次 CI 逐层验证。
+- **仍未开始的是 M1 功能装配与真机验收**（见 §3），不是 CI 修复；按用户裁定的
+  「主动上传 → 主动按 Action 结果改代码 → 循环到 CI 转绿」，本轮闭环到此结束。
 
 ---
 
@@ -200,20 +203,59 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 文件:行:列，一轮定位完成（D23）。
 
 **仍未验证**：`cargo test` 全量（含 doctest）、`cargo build`、package job、
-`probe.rs` 实际运行。待第 15 次 CI。
+`probe.rs` 实际运行。待第 15 次 CI。（→ **已由 §0.7 全部关闭**）
+
+---
+
+## 0.7 第 15 次 CI（run `43673089804`，commit `63685f9`）实测结果 —— 全绿 / 闭环达成
+
+> 判读通道：`GET /repos/tikey1/zsdesk/actions/runs/43673089804/jobs?per_page=100`
+> **逐 step 核对** + `/actions/runs/43673089804/artifacts` 核实产物；
+> `GET /repos/tikey1/zsdesk/commits/63685f9/check-runs` 显示 3 个 check-run 全 `success`。
+
+| job | 结果 | 结论 |
+|---|---|---|
+| Rust 编译 / 测试 | **success** | Gate S14、**`cargo test --locked` 首次通过（含 doctest 与 13 个单元测试）**、Gate S13、`cargo build`、clippy、上传 exe 全绿 |
+| core-ui 源码构建 | **success** | 从源码构建 + x64 断言 + Gate G2 / S7 / **S7'** 连续第七次全绿 |
+| 便携包组装 | **success** | **本 job 首次真正执行**：Gate S12 / 收 VC++ x64 CRT / smoke probe 首次编译 / **真实 DLL + 真实 `.uix` 冒烟通过** / ZIP 打包与上传 |
+
+**第 14 次遗留的 4 项未知全部关闭**：
+
+| 第 14 次时的未知项 | 第 15 次裁决 |
+|---|---|
+| `cargo test` 全量（含 doctest） | ✅ rust job step 8 `success` |
+| `cargo build --locked --release -p zsdesk-app` | ✅ step 10 `success` |
+| package job 首次真正执行 | ✅ 13 步中 12 步 `success`；`Package job failure locator` 按条件 `skipped`（**预期**） |
+| `probe.rs` 编译 + 实际运行 | ✅ step 10 首次编译成功、step 11 冒烟退出码 0 |
+
+**真因 I（第 14 次唯一剩余）已修复并证实**：`probe.rs` 的
+`String::from_utf8_lossy(...)` 加 `.into_owned()`，与 `if` 分支的 `String::new()`
+统一为 `String`（commit `63685f9`）。第 15 次 CI 不再报 `E0308`。
+
+**产物**：`ZSDesk-full-x64` 4,941,625 B（≈ 4.71 MiB，未触 10 MB 红线）、
+`zsdesk-app-full-x64` 2,358,072 B、`core-ui-x64` 1,981,859 B、
+`core-ui-build-log` 22,423 B；四个 artifact 均 `expired: false`。
+
+**闭环结论**：按用户 2026-11-15「代码编写完主动上传、主动根据 Action 结果修改代码、
+循环到 CI 转绿」的裁定，本轮无需继续修 bug。**剩余工作转入 M1 功能装配与真机验收**（§3），
+与 CI 修复闭环无关。
+
+> 诚实边界：`Package job failure locator` 的**失败分支**在第 15 次未被触发
+> （job 成功 ⇒ 条件步骤 skipped），因此该 `::error::` 捕获逻辑仍属**未实测**，
+> 不得写成「已验证」。CI 全绿也**不等于**真机渲染 / 32 个句柄 / `:root` 视觉正确。
 
 ---
 
 ## 1. 已写入磁盘的改动与静态复核记录
 
-> **口径（2026-11-15 更新）**：本表混合三类条目，逐行带标签 ——
-> ① 已随 `1a00121` 推送的历史项；② 已随 `aa7e9b5` 推送、并由**第 11 次 CI 证实
-> core-ui/Gate S7' 修复有效**的项（标「已于 aa7e9b5 推送」）；
-> ③ 2026-11-15 按第 11 次 CI 报错新修、`git status` 仍为 `M`、**尚未推送**的项
-> （表格末尾两行）。
+> **口径（2026-11-15 第 15 次 CI 后更新）**：本表是**历史静态复核记录**，
+> 逐行标签（含「未推送」「未编译」「待 CI 编译验证」）描述的是**写入当时**的状态，
+> **不代表当前状态**，请勿据此判断项目进度。所有条目均已随
+> `aa7e9b5` / `6f96662` / `16066e6` / `33aca13` / `63685f9` 依次推送，
+> 并由第 11~15 次 CI 逐层验证；收口结论见 **§0.7** 与 `docs/ci.md` §6。
 > 本机**无 cargo / rustc** 且缺 `zsui` path 依赖 ⇒ 本表所有「验证」都只是
-> **静态 / 本机脚本级复核**，一律不代表「已通过编译或测试」；编译结论只能由
-> 第 12 次 CI 回答。旧标题「已通过本地验证」措辞过强，已收敛。
+> **静态 / 本机脚本级复核**，一律不代表「已通过编译或测试」；
+> 编译结论以第 15 次 CI 为准。旧标题「已通过本地验证」措辞过强，已收敛。
 
 | 项 | 文件 | 验证方式 |
 |---|---|---|
@@ -239,28 +281,33 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 | **S14 Rust 模块布局门禁** | `scripts/gates/rust_module_layout_check.py` + `.github/workflows/build.yml` | **【2026-11-15 本轮，未推送】** 机械复现 Rust 模块文件解析规则，接在 `cargo test` **之前**（rust job 10 → 11 步），失败原因 emit `::error::`。正常态覆盖 6 个 crate root / 127 个 `.rs` 文件 EXIT=0；负控①去掉 `#[path]` → 精确报出第 11 次 CI 的那 5 个 E0583；负控②保留 `#[path]` 抽掉 `theme.rs` → 精确点名 theme |
 | **Windows cp1252 编码修复（第 12 次 CI 真因）** | `.github/workflows/build.yml` + `scripts/gates/{qa_uix_verify,rust_module_layout_check,s13_token_namespace_check,theme_contrast_check,ui_id_manifest_check,uix_tag_check}.py` | **【2026-11-15 本轮，按新规矩主动推送】** 顶层 `env` 钉 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`；六脚本各加 stdout/stderr UTF-8 自包含加固。`PYTHONIOENCODING=cp1252` 下修复前后对照：S14 与 `theme_contrast_check` 由 `EXIT=1` 变 `EXIT=0`，六个门禁全部通过；负控仍报 5 条 E0583 |
 | 决策台账 D17–D20、第十三 / 十四 / 十五 / 十六轮 | `DECISIONS.md` | — |
+| **【收口，2026-11-15】上表所有「未推送 / 未编译 / 未验证」条目** | 全仓 | **已随 `aa7e9b5`~`63685f9` 依次全部推送；第 15 次 CI（run `43673089804`）三个 job 全绿 —— `cargo test`（含 13 个单元测试与 doctest）、`cargo build`、Gate S13 / S14、`probe.rs` 首次编译与实际运行、package job 全链路全部通过。逐项证据见 §0.7 与 `docs/ci.md` §6** |
 
 ---
 
-## 2. 待第 13 次 CI 复验的事项
+## 2. CI 复验事项（**全部已关闭**）
 
-> 第 12 次 CI（run `43670088427`）core-ui 仍全绿，但新增的 Gate S14 因 Windows
-> `cp1252` 编码崩溃（§0.4），`cargo test` 及其后所有步骤**仍未跑到**。
-> 本轮已全局修编码并主动推送。下面各小节保留当时的分析过程；
-> **最新状态以本表为准**：
+> 本节原题为「待第 13 次 CI 复验的事项」。截至**第 15 次 CI**（run `43673089804`）
+> 三个 job 全绿，表内所有 ⏳ 项均已由真实 CI 逐层关闭。
+> 下面各小节（§2.1~§2.4）保留当时的分析过程，**仅作历史追溯**；
+> **最新状态以本表、`docs/ci.md` §6 与 `PROJECT_STATE.md` 为准**。
 
-| 小节 | 第 11 次 CI 的裁决 | 现在状态 |
+| 原待验事项 | 关闭于 | 证据 |
 |---|---|---|
-| §2.1 core-ui C++ 构建 | 第三次 success | ✅ 关闭 |
-| §2.1b `Cargo.lock` / `cargo test --locked` | Test **没有**再报 `--locked` 漂移 ⇒ 锁文件修复有效 | ✅ 该真因关闭（但 Test 因 E0583 仍失败） |
-| §2.1c Gate S7' 路径 | **Gate S7' = success** ⇒ `$env:GITHUB_WORKSPACE` 修复有效 | ✅ 关闭 |
-| §2.4 五个 S13 门禁在 CI 首次执行 | 仍被 Test 失败跳过 | ⏳ 待第 12 次 CI |
-| `cargo build` / package job / `probe.rs` 编译 | 仍被跳过 | ⏳ 待第 12 次 CI |
-| **新增：Gate S14 / 五个 S13 门禁在 CI 首次执行** | 第 12 次止步于 S14 的 `cp1252` 编码崩溃 | ⏳ 待第 13 次 CI（编码已全局修复，本地 cp1252 复验通过） |
-| **新增：Rust 5 个模块文件首次被 rustc 编译** | 前 12 次都止步于更早环节，模块内容从未编译 | ⏳ **最大未知**，待第 13 次 CI |
+| §2.1 core-ui C++ 构建 | 第 9 次 CI | 第 9~15 次连续 `success`，D21 退路已关闭 |
+| §2.1b `Cargo.lock` 漂移 | 第 11 次 CI | 不再报 `--locked` 漂移 |
+| §2.1c Gate S7' 路径 | 第 11 次 CI | `$env:GITHUB_WORKSPACE` + `Join-Path` 修复经真实 CI 证实 |
+| §2.4 五个 S13 门禁在 CI 首次执行 | 第 13 次 CI | 第 13 / 15 次均通过 |
+| **Gate S14 在 CI 首次执行** | 第 13 次 CI | 第 12 次 `cp1252` 崩溃已由全局 UTF-8 修复；第 13 / 15 次通过 |
+| **Rust 5 个模块文件首次被 rustc 编译** | 第 13 次（首次）/ 第 15 次（全通过） | 暴露的 5 个类型/借用错误已在 `33aca13` 修复 |
+| **`cargo test --workspace --release --locked`** | **第 15 次 CI** | rust job step 8 `success`，含 doctest 与 13 个单元测试 |
+| `cargo build` / clippy / upload exe | 第 15 次 CI | rust job step 10 / 11 / 12 全 `success` |
+| **package job 全链路**（Gate S12 / CRT / probe 编译与运行 / ZIP / 上传） | **第 15 次 CI 首次真正执行** | package job 12 步 `success`，第 13 步按条件 `skipped` |
+| `probe.rs` 的 `E0308` | 第 15 次 CI | `63685f9` 的 `.into_owned()` 修复生效，不再报错 |
 
-> 本机**无 cargo / rustc** 且缺 `zsui` path 依赖 ⇒ 静态复核不能替代编译。
-> 修完 E0583 后才轮到类型 / 借用检查，第 12 次 CI 仍可能暴露下一批编译错误。
+> 本机**无 cargo / rustc** 且缺 `zsui` path 依赖 ⇒ 「静态复核不能替代编译」
+> 这条纪律仍然有效；只是本节的未知项已全部由 CI 逐轮回答完毕。
+> 唯一仍属**未实测**的是 `Package job failure locator` 的失败分支（job 成功时条件步骤 skipped）。
 
 ### 2.1 ✅ 已关闭：core-ui 的 C++ 构建
 
@@ -440,4 +487,6 @@ curl -s "https://api.github.com/repos/tikey1/zsdesk/check-runs/<JOB_ID>/annotati
 3. **作者不得自审** —— 产出需另一方独立复核（本轮 QA 与架构师的双向复核
    实际抓出了 6 个 P1 级问题，全部已修）。
 4. **未验证的东西必须标注** —— 本文件即为该纪律的载体：
-   §1 = 已验证，§2 = 未验证，§3 = 未开始。
+   §0.7 = 当前已验证结论，§1 = 历史静态复核记录，§2 = CI 复验事项（**已全部关闭**），§3 = 未开始。
+   第 15 次 CI 之后，**M1 功能装配、真机首渲染清单、Inno Setup 安装包编译、Release 分发**
+   仍是明确标注的未验证 / 未开始项，见 `PROJECT_STATE.md`「风险」与「下一步」。
