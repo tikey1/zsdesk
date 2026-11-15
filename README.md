@@ -1,4 +1,12 @@
-AI修改，自己做着玩# ZSDesk
+**AI 修改**：自己做着玩（经 AI 辅助修改的 fork）。
+
+# ZSDesk
+
+> **Fork 说明**：本仓库是 [`qiu7824/zsdesk`](https://github.com/qiu7824/zsdesk) 的 fork（基于 v0.3.12），
+> 目标为把 UI 从 ZSUI 迁移到 [`ghboke/core-ui`](https://github.com/ghboke/core-ui)、将图片预览与
+> `C:/Program Files/GuoheView`（GuoheView）强关联，并采用 Windows 10 / WinUI 3 / Fluent 风格；
+> 仅构建 x86-64。当前构建仍包含 ZSUI（MPL-2.0）依赖，全量业务功能（M1）尚未装配，
+> 详见 [README-FORK.md](README-FORK.md)。
 
 Windows 原生多标签文件管理器与桌面格子，使用 Rust、Win32/COM、Direct2D 和 DirectWrite。
 
@@ -302,7 +310,12 @@ cargo build --release --locked -p zsdesk-app --no-default-features --features de
 `-RuntimeDir` 可指定 Visual Studio Redist 下的 CRT 目录。
 打包器逐项校验 Everything 的官方文件哈希与资源版本，仅复制固定的四个分发文件。
 
-项目代码使用 [MIT](LICENSE)；ZSUI 使用 MPL-2.0，MinHook 使用 BSD-2-Clause。
+本 fork 的自身代码使用 [MIT](LICENSE)（Copyright (c) 2026 tikey1，并保留上游
+`Copyright (c) 2026 ZSDesk contributors`）。UI 层正从上游的 ZSUI（MPL-2.0）迁移到
+[`ghboke/core-ui`](https://github.com/ghboke/core-ui)（MIT，Copyright (c) 2026 Core UI contributors）；
+当前构建仍包含 ZSUI，因此其 MPL-2.0 义务对分发产物生效。MinHook 使用 BSD-2-Clause。
+完整第三方署名（含两上游代码引用、ZSUI、Everything、Explorer Column View、rust-pinyin 等）见
+[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) 与
+[packaging/licenses/NOTICE.txt](packaging/licenses/NOTICE.txt)。
 Everything 及其 PCRE 组件的版权和完整许可见
 [Everything-1.4.1.1032-License.txt](packaging/licenses/Everything-1.4.1.1032-License.txt)。
-其余组件声明见 [packaging/licenses/NOTICE.txt](packaging/licenses/NOTICE.txt)。

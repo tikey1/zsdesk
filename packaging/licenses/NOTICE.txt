@@ -5,7 +5,7 @@ This is a fork of qiu7824/zsdesk, distributed under the MIT License (see the
 root LICENSE file). The UI layer of the upstream (ZSUI, MPL-2.0) is being
 replaced by ghboke/core-ui (MIT License, Copyright (c) 2026 Core UI
 contributors; https://github.com/ghboke/core-ui). This fork's OWN code is MIT
-(Copyright (c) 2026 ZSDesk contributors); the root MIT license covers only this
+(Copyright (c) 2026 tikey1 and ZSDesk contributors); the root MIT license covers only this
 fork's own code and does NOT re-license ZSUI.
 
 Until the zsui dependency is removed from Cargo.toml and the source imports
