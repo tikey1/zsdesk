@@ -4,7 +4,7 @@
 
 > **Fork 说明**：本仓库是 [`qiu7824/zsdesk`](https://github.com/qiu7824/zsdesk) 的 fork（基于 v0.3.12），
 > 目标为把 UI 从 ZSUI 迁移到 [`ghboke/core-ui`](https://github.com/ghboke/core-ui)、将图片预览与
-> `C:/Program Files/GuoheView`（GuoheView）强关联，并采用 Windows 10 / WinUI 3 / Fluent 风格；
+> GuoheView强关联，并采用 Windows 10 / WinUI 3 / Fluent 风格；
 > 仅构建 x86-64。当前构建仍包含 ZSUI（MPL-2.0）依赖，全量业务功能（M1）尚未装配，
 > 详见 [README-FORK.md](README-FORK.md)。
 
