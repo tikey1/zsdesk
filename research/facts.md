@@ -11,7 +11,7 @@
 |---|---|---|
 | 定位 | Windows 原生多标签文件管理器 + 桌面格子 | 仓库 README |
 | 技术栈 | Rust + Win32/COM + Direct2D + DirectWrite | 仓库 README |
-| 当前版本 | 0.3.11 | 仓库 README / Cargo.toml |
+| 当前版本 | 0.3.11（**v0.3.11 调研时快照**；2026-11-15 已同步上游 v0.3.12 `cb465e8`） | 仓库 README / Cargo.toml |
 | workspace 成员 | `crates/zsdesk-core`、`zsdesk-platform`、`zsdesk-app`、`zsdesk-ui`、`zsdesk-windows` | `Cargo.toml`（raw 实测） |
 | Rust 基线 | `edition 2021`，`rust-version = "1.89"`，CI 用 1.99 | `Cargo.toml`（raw 实测） |
 | 共享依赖 | serde / serde_json / tracing / tracing-subscriber / anyhow / dirs | `Cargo.toml`（raw 实测） |

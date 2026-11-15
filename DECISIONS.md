@@ -1101,3 +1101,17 @@ $PSNativeCommandUseErrorActionPreference = $false
     真机渲染 / 32 个句柄 / `:root` 视觉、`docs/13` 首渲染清单、Inno Setup 安装包编译、
     M1 全量业务功能与 Release 分发均未开始。**CI 全绿 ≠ 功能完整或界面正确**。
   - **流程**：一次性互查豁免止于本闭环；后续开启新开发日须恢复「每天写码前成员互查」。
+- 2026-11-15 **第二十轮（同步上游 v0.3.12 + 成员互查闸门恢复）**：
+  - **用户指令**：「同步上游更新的源码」，拍板「完整合并 v0.3.12（推荐）」。
+  - **调研**：上游 `qiu7824/zsdesk` 从 fork 基线 `6aec0c2`（v0.3.11）前进 2 提交（`ec7e5d2` Release 0.3.12、`cb465e8` 粘贴目标测试修复）/ **108 文件**；`core-ui` pin `1840d689` 已是最新（1.9.0 build 345）、`zsui` 领先 13 提交只改 `docs/images/star-history.svg` ⇒ **两个 pin 文件不动**。
+  - **互查闸门（一次性豁免结束后的首次严格执行）**：架构师 **Go（有条件，合并前零阻断）**、QA 首轮 No-Go → 基于真实上游对象重判 **Go**、运维 No-Go（只拦回滚锚点）→ 补齐前置即 Go。三路收口后方动代码。
+  - **关键实施决策**：
+    ① `git merge --no-ff upstream/main`，**不用 rebase**（`docs/12` 的 `6ea629f`、`README-FORK.md` 的 `6aec0c2` 等历史引用依赖祖先链可解析）。
+    ② **禁止用上游 `Cargo.toml` / `Cargo.lock` 整文件覆盖**（运维硬约束：会抹掉 `crates/zsdesk-coreui` → `--locked` 必挂）。实际走三方自动合并，tomllib 实测 127 包有序、零悬空/歧义引用、`zsdesk-coreui 0.1.0` 保留、`zsdesk-windows` 引用 `"roxmltree 0.20.0"` 带版本后缀。
+    ③ **唯一冲突 `README.md`** 人工裁决：保留 fork 的「AI修改」前缀与单行全量版表（用户既定「只做全量 x64」）、版本写 `0.3.12`、修掉「上述六个版本」既存矛盾文案；上游 0.3.12 功能描述与 `CHANGELOG ## 0.3.12` 完整带入。**不改** CHANGELOG 的 0.3.11 历史条目、不动 `docs/12` 的 `6ea629f`、不动两个 pin 与 `assets/ui-ids.json`。
+    ④ `.gitattributes` 补 `*.zip binary`（上游新增 `virtual-files.zip`，此前仅 `text: auto`）。
+    ⑤ **回滚锚点**：本地 tag + 备份分支 `pre-upstream-0.3.12` = `9a3628b`；刻意不 push tag（`on: push` 无分支过滤会额外触发旧 commit 的 CI、干扰判读序列），远端锚点由 merge commit 第一父 `9a3628b` 提供。若 CI 红用 `git revert -m 1`，**禁止** `reset --hard` + force push。
+  - **成员发现并采纳的口径**：QA 实测 S14 对 `#[cfg(test)]#[path="..."]mod <别名>;` 同行多属性写法漏检（删目标文件仍 PASS）；架构师更正「10 个测试文件是孤儿」的说法作废——它们会被 `cargo test` 收集。QA 收口数字：上游共 **31 个 `#[path]` 声明 / 31 个唯一目标**，其中 28 个含 `#[test]`、3 个不含测试（`context_menu_background.rs`、`window/wps_render_process.rs`、`shell/menu_target.rs`）；18 个同行带 `mod`、13 个分行。⇒ **S14 的 PASS 只能读作「文件齐全不触发 E0583」，不是「新增模块布局已完整验证」**；CI 判读按 `#[test]` 402→512 / `#[ignore]` 59→84（`passed` 343→428）核对，不得有既有 `#[test]` 被改成 `#[ignore]`、断言总数不得下降。
+  - **契约漂移入账（非阻断，M1 前置）**：`spec/migration-matrix.md` 的 138 文件 / 42,150 行四档清单对 v0.3.12 整体失效（实测 166 / 55,420，+31.5%，合并后 174）；已在文件顶部钉「v0.3.11 基线快照 @ 6aec0c2」并注明重算列为 M1 前置。`README-FORK.md` / `docs/10` / `research/facts.md` / `spec/ci-implementation-notes.md` 同步标注基线快照。
+  - **既存架构债入账（非本次引入）**：`spec/crate-layout.md:41/:115` 的 `forbid(unsafe_code)` 与 S9/S10 执行器从未落地（v0.3.12 后 gap 89→110 个 `.rs`）；QA 的 59 ignore + 8 处 `return Ok(())` + `build.yml:94` 不带 `-- --ignored` 属既存质量债，**不随本次合并关闭**，登记为独立 backlog。
+  - **诚实边界**：上游新增 28 个 `.rs` / +13,270 行首次进入 `cargo test --workspace --release --locked`；本机无 cargo/rustc，**编译与测试结论只能由第 17 次 CI 给出，不得预设通过**。

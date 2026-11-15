@@ -5,5 +5,7 @@
 *.ps1 text eol=crlf
 *.rc text eol=crlf
 *.ico binary
+# 上游 v0.3.12 新增的测试资源；显式标 binary，避免 text=auto 在跨平台 checkout 时改写字节。
+*.zip binary
 # Preserve upstream license files byte for byte.
 packaging/licenses/** -text whitespace=-blank-at-eol,-blank-at-eof

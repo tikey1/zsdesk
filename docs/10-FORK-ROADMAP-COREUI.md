@@ -1,8 +1,9 @@
 # Fork 改造路线图：ZSDesk → Core UI 版本
 
 - 日期：2026-11-13
-- Fork：`tikey1/zsdesk`（public，默认分支 `main`，上游基线 `6aec0c2 Release ZSDesk 0.3.11 fixes`；fork 当前 HEAD 以 `git rev-parse origin/main` 为准）
-- 上游：`qiu7824/zsdesk` v0.3.11，MIT，`Copyright (c) 2026 ZSDesk contributors`
+- Fork：`tikey1/zsdesk`（public，默认分支 `main`，建 fork 时上游基线 `6aec0c2 Release ZSDesk 0.3.11 fixes`；fork 当前 HEAD 以 `git rev-parse origin/main` 为准）
+- 上游：`qiu7824/zsdesk`，MIT，`Copyright (c) 2026 ZSDesk contributors`；**2026-11-15 已同步 v0.3.12（`cb465e8`）**
+- ⚠️ 本文写于 v0.3.11 基线期，文中的代码量 / 文件数 / 版本描述均为**该基线快照**，不代表当前代码面；当前状态见 `PROJECT_STATE.md`，逐文件迁移矩阵失真说明见 `spec/migration-matrix.md` 顶部。
 - 状态：**P0 已完成；C3（全量 x64）已拍板；C1 / C2 / C4 / C5 待确认，P1~P4 待执行**
 
 ## 1. 上游现状（只读调研结论）

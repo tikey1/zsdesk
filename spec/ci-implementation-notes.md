@@ -298,7 +298,7 @@
 ### R9 【P1】打包出来的 exe **从未被验证身份**（上游 `Get-BuildInfo` 整个丢了）
 
 - **位置**：`build.yml:417-493`
-- **上游有**（`scripts/package.ps1:92-111`）：`Get-BuildInfo` ① 校验 exe 的**版本资源** == workspace version（`0.3.11`）；② **实际运行** exe 的 `--build-info`，解析 JSON 校验 `product=ZSDesk` / `edition` / `network` / `desktop` / `themed`。
+- **上游有**（`scripts/package.ps1:92-111`）：`Get-BuildInfo` ① 校验 exe 的**版本资源** == workspace version（**当时值 `0.3.11`**；2026-11-15 同步上游 v0.3.12 后为 `0.3.12`）；② **实际运行** exe 的 `--build-info`，解析 JSON 校验 `product=ZSDesk` / `edition` / `network` / `desktop` / `themed`。
 - **CI 版没有** → 打错 edition、打错产物、或 exe 启动即崩，CI 都不会发现。
 - **建议**：在 `Package the portable x64 zip` 里加一段（照抄上游逻辑）：
   ```powershell
