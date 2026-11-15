@@ -1,3 +1,113 @@
+==============================================================================
+ZSDesk-coreui — Third-party notices and upstream attributions
+==============================================================================
+This project is a fork distributed under the MIT License.
+
+The choice of the MIT License is dictated by the two upstream projects this
+fork is derived from, BOTH of which are MIT-licensed:
+
+  * qiu7824/zsdesk  — MIT License
+  * ghboke/core-ui   — MIT License
+
+Because MIT is a permissive, one-way-compatible license, a derivative work of
+two MIT projects may itself be distributed under MIT, provided the original
+copyright notices and the license texts of BOTH upstreams are preserved. This
+file does exactly that, and additionally records the specific portions of each
+upstream's code that this project reuses ("写明引用这两处的代码").
+
+NOTE ON ZSUI (MPL-2.0):
+The upstream qiu7824/zsdesk originally bundled its UI layer "ZSUI" under the
+Mozilla Public License 2.0. This fork's design intent is to REPLACE ZSUI with
+ghboke/core-ui (MIT). ZSUI is still an ACTIVE build/runtime dependency of this
+fork: it is referenced as a path dependency (e.g. ../../../zsui) from
+crates/zsdesk-app/Cargo.toml and crates/zsdesk-ui/Cargo.toml, pinned in
+Cargo.lock as zsui 0.3.0-alpha.2, and its types are still imported by
+crates/zsdesk-ui. (The zsui source directory is not vendored into this tree, but
+the dependency is live.) Therefore the MPL-2.0 obligation for those ZSUI files
+applies to the distributed product TODAY, and the notice
+(packaging/licenses/ZSUI-MPL-2.0.txt) remains in force. This fork becomes pure
+MIT only after the zsui dependency is removed from Cargo.toml and the source
+imports (crates/zsdesk-ui) — not merely by replacing the UI in crates/zsdesk-coreui.
+
+==============================================================================
+1. Upstream: qiu7824/zsdesk  —  MIT License
+==============================================================================
+Project    : ZSDesk — Native Windows tabbed file manager and desktop fences.
+Repository : https://github.com/qiu7824/zsdesk
+Base version used: v0.3.12
+License    : MIT License
+Copyright  : Copyright (c) 2026 ZSDesk contributors
+
+Code reused from this upstream (modified as needed for this fork):
+  - The Rust workspace and crate layout:
+        zsdesk-core, zsdesk-platform, zsdesk-app, zsdesk-ui,
+        zsdesk-windows, zsdesk-coreui
+  - File-management, integrated search, preview hosting, context-menu hosting,
+    desktop fences, and system-integration application logic.
+  - Build, test and packaging scripts (scripts/, packaging/, .github/workflows).
+  - The third-party attributions carried over and listed in section 3.
+
+  MIT License
+  Copyright (c) 2026 ZSDesk contributors
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+==============================================================================
+2. Upstream: ghboke/core-ui  —  MIT License
+==============================================================================
+Project    : Core UI — native UI runtime that replaces the upstream's ZSUI layer.
+Repository : https://github.com/ghboke/core-ui
+License    : MIT License
+Copyright  : Copyright (c) 2026 Core UI contributors
+
+Code reused from this upstream (the UI layer of this fork):
+  - The C ABI contract (UI_CORE_API.md) consumed by crates/zsdesk-coreui.
+  - The .uix single-file-component model and its renderer.
+  - The prebuilt Core UI runtime (core-ui.dll) integrated via crates/zsdesk-coreui.
+  - Corresponding source revision:
+    https://github.com/ghboke/core-ui/tree/1840d689b51a32d392dbf06b8d594aef96696a80
+
+  MIT License
+  Copyright (c) 2026 Core UI contributors
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in all
+  copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+==============================================================================
+3. Other third-party components (carried from upstream / added by this fork)
+==============================================================================
+
 Private context-menu interface declarations were adapted from Explorer Column
 View by ItsMikesch, commit 979767ccedef11d2768bffb4f82722ea68b4dedc.
 Source: https://github.com/ramensoftware/windhawk-mods/blob/979767ccedef11d2768bffb4f82722ea68b4dedc/mods/explorer-column-view.wh.cpp
@@ -14,16 +124,16 @@ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 
 Everything search engine
 ========================
@@ -61,3 +171,8 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Additional component licenses (MinHook BSD-2-Clause, native-menu MIT, HarfRust
+MIT, Microsoft Visual C++ Runtime, and the full Rust dependency set) are listed
+in packaging/licenses/NOTICE.txt and the package-named files under
+packaging/licenses/.

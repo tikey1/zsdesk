@@ -1,3 +1,24 @@
+==============================================================================
+Fork note (ZSDesk-coreui / tikey1 fork of qiu7824/zsdesk)
+==============================================================================
+This is a fork of qiu7824/zsdesk, distributed under the MIT License (see the
+root LICENSE file). The UI layer of the upstream (ZSUI, MPL-2.0) is being
+replaced by ghboke/core-ui (MIT License, Copyright (c) 2026 Core UI
+contributors; https://github.com/ghboke/core-ui). This fork's OWN code is MIT
+(Copyright (c) 2026 ZSDesk contributors); the root MIT license covers only this
+fork's own code and does NOT re-license ZSUI.
+
+Until the zsui dependency is removed from Cargo.toml and the source imports
+(crates/zsdesk-ui), the ZSUI MPL-2.0 entry below remains applicable to those
+specific files — the MPL-2.0 obligation applies to the distributed product
+today, not only after a future cleanup. Once zsui is fully removed, the
+distribution becomes pure MIT and that entry can be dropped.
+
+The two primary upstream attributions (qiu7824/zsdesk and ghboke/core-ui), with
+the exact portions of code reused, are documented in the root
+THIRD-PARTY-NOTICES.txt.
+==============================================================================
+
 Third-party components
 ======================
 ZSUI 0.3.0-alpha.2: Mozilla Public License 2.0.
@@ -5,6 +26,13 @@ Source: https://github.com/qiu7824/zsui
 Corresponding source revision:
 https://github.com/qiu7824/zsui/tree/a18557c8b845efd448936aa991f1a5271bc10143
 See ZSUI-MPL-2.0.txt.
+
+ghboke/core-ui (UI layer, replaces ZSUI): MIT License; Copyright (c) 2026 Core UI contributors.
+Repository: https://github.com/ghboke/core-ui
+The prebuilt / CI-built core-ui.dll consumed by crates/zsdesk-coreui is
+distributed under MIT. Corresponding source revision:
+https://github.com/ghboke/core-ui/tree/1840d689b51a32d392dbf06b8d594aef96696a80
+See ghboke-core-ui-MIT.txt.
 
 Native menu interface declarations: MIT; see Native-menu-MIT.txt.
 
