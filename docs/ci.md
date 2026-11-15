@@ -38,7 +38,8 @@ core-ui  ──┘
 
 ## 2. 步骤明细
 
-> 验证状态以 **run `43673089804`（第 15 次 CI，commit `63685f9`）** 为准。
+> 验证状态以 **run `43678206351`（第 17 次 CI，merge commit `aa44acc`）** 为当前基线；
+> 下表步骤明细沿用第 15 次 CI 的首次跑通记录（历史），当前基线见 §6。
 > **三个 job 全部 `success`**，下表每个步骤都在真实 CI 执行并通过；
 > 唯一标记为 `skipped` 的是条件步骤 `Package job failure locator`（job 成功时不执行，**属预期**）。
 > 第 9~14 次的失败链与逐轮修复见 §6、`docs/15` §0.1~§0.6、`DECISIONS.md` 第十五~十八轮。
@@ -52,7 +53,7 @@ core-ui  ──┘
 | **`cargo test --workspace --release --locked`** | 全量测试（含 13 个单元测试与 doctest） | ✅ **第 15 次首次通过**；此前第 9/10 次锁文件漂移、第 11 次 E0583、第 13 次 5 个类型/借用错误、第 14 次 `probe.rs` E0308 |
 | **Gate S13**（5 个门禁） | 标签 / token 命名空间 / id 清单 / 对比度 / 间距 | ✅ 第 13 次起连续通过 |
 | `cargo build --locked --release -p zsdesk-app` | 构建 full edition | ✅ **第 15 次首次执行并通过** |
-| `cargo clippy`（advisory） | 静态检查，**不阻断** | ✅ 第 15 次首次执行并通过 |
+| `cargo clippy`（advisory / `continue-on-error`） | 静态检查，**不阻断** | ✅ step 记为 `success`；**不等于 clippy 零告警**（公开 annotations 有 `Process completed with exit code 1.` 文本），见 §6 |
 | Upload the executable | 传 exe 给 package job | ✅ 产出 `zsdesk-app-full-x64` 2,358,072 B |
 
 ### job `core-ui`（16 步，全部 success）
@@ -157,43 +158,68 @@ CI 上的雷点：① `GIT_SHALLOW` + tag 的浅克隆；② quickjs 的子模�
 
 ## 6. 已验证 / 未验证分界
 
-> 当前基线 = **第 15 次 CI（run `43673089804`，commit `63685f9`）三个 job 全绿**；
-> 纯文档提交 `9a3628b` 的**第 16 次 CI**（run `43674268118`）同样全绿。
+> 当前基线 = **第 17 次 CI（run `43678206351`，merge commit `aa44acc`）三个 job 逐 step 全 `success`**；
+> 第 15 次（run `43673089804`，commit `63685f9`）与第 16 次（run `43674268118`，纯文档提交 `9a3628b`）
+> 同样全绿，均为**历史基线**。
 >
 > ⚠️ **2026-11-15 上游同步后**：本仓库已用 `--no-ff` merge 合入 `qiu7824/zsdesk`
-> v0.3.12（2 提交 / 108 文件，新增 28 个 `.rs` / +13,270 行），`cargo test` 的编译与
-> 测试面显著扩大（`#[test]` 402→512、`#[ignore]` 59→84）。**上表是合并前的验证结论**；
-> 表中 ZIP 体积 4,941,625 B 也是合并前的历史产物，合并后必然变化。
-> 合并后的结论以新一轮 CI 为准，见 `PROJECT_STATE.md` 与 `DECISIONS.md` 第二十轮。
-> 判读方式是 `GET /actions/runs/43673089804/jobs?per_page=100` **逐 step 核对**
-> + `GET /actions/runs/43673089804/artifacts` 核实产物，**不只看 run 的 `conclusion`**。
+> v0.3.12（2 提交 / 108 文件，新增 28 个 `.rs` / +13,270 行），`cargo test --workspace --release --locked`
+> 在扩大后的代码面上再次通过（**第 17 次 CI 已给出结论，不再是「待判读」**）。
+> 权威测试口径取 `.rs` 属性总数：合并前 fork → 合并后 `#[test]` **402→527**、`#[ignore` **59→84**
+> （上游 `cb465e8` 单独为 512 / 84；旧写法 402→512 / `passed` 343→428 是跨对象 + 混口径，已作废）。
+> 其中 14 个 `#[ignore` 写成 `#[test]#[ignore="..."]` 同行；静态非 ignored 估算 343→443。
+> **runner 的 `passed`/`ignored`/`failed` 具体数字无公开通道**：`test-output.txt` 只由 `:94` 的
+> `Tee-Object` 落盘、成功分支（`:126`）不 emit annotation、未收录进任何 artifact，job logs 需 admin（403）
+> ⇒ 一律标「静态估算、未观测」；`build.yml:94` 不带 `-- --ignored`，**84 个 ignored 测试从未执行**。
+>
+> 表中 ZIP 体积 4,941,625 B 是**合并前的历史产物**；第 17 次实测 `ZSDesk-full-x64`
+> **5,594,915 B ≈ 5.34 MiB**（未触 10 MB 红线），`zsdesk-app-full-x64` 3,006,887 B、
+> `core-ui-x64` 1,981,859 B、`core-ui-build-log` 22,420 B，四个 artifact 均 `expired: false`。
+>
+> **判读纪律（第 17 次重点）**：`GET /actions/runs/43678206351/jobs?per_page=100` **逐 step 核对**
+> + `GET /actions/runs/43678206351/artifacts` 核实产物，**不只看 run 的 `conclusion`，也不看 `annotation_level`**。
+> 第 15/16/17 次公开 annotations 逐条完全一致：core-ui 的 10 条 `failure` 级文本来自
+> `build.yml:361/:372/:384` 的无条件日志探针（`:370` 正则显式含 `warning`，`errorHits=534`
+> 是 error+warning 总命中）；Rust 的 `Process completed with exit code 1.` 对应
+> `continue-on-error: true` 的 `Clippy (advisory)`；另有三个 job 各 1 条 Node.js 20 deprecated warning。
+> `::error::` 不改变 step 退出码，`build.yml:395` 保证构建真失败会 `throw`。
+> ⇒ **clippy 的 step `success` 是 advisory 语义，不等于 clippy 零告警**。
 >
 > 第 9~14 次的失败链已全部关闭：日志管道被 PowerShell 中断 → `Cargo.lock` 漂移 /
 > `${{ env.GITHUB_WORKSPACE }}` 空值 → `E0583` 模块布局 → Windows `cp1252` 编码崩溃 →
 > 5 个 Rust 类型/借用错误 → `probe.rs` 的 `Cow<str>`/`String` 类型不符。
-> 逐轮真因与修法见 `docs/15` §0.1~§0.7 与 `DECISIONS.md` 第十五~十九轮。
+> 逐轮真因与修法见 `docs/15` §0.1~§0.8 与 `DECISIONS.md` 第十五~二十一轮。
 >
 > **仍有效的教训**：Windows runner 的 Python stdout 默认 `cp1252`，门禁打印中文会抛
 > `UnicodeEncodeError`；顶层 `env` 已钉 `PYTHONIOENCODING=utf-8` + `PYTHONUTF8=1`，
 > 六个门禁脚本另带自包含加固。**本机中文环境复验全绿不代表 CI 绿**，
 > 本地须额外用 `PYTHONIOENCODING=cp1252` 模拟。
+>
+> **第 18 次 CI 预登记**：`build.yml:3-6` 的 `on: push` 无分支过滤，本次纯文档回写
+> push 后必然触发第 18 次 CI，须单独判读，不得并入第 17 次结论。
+>
+> **P2 登记（非阻断，本轮不改）**：`:91` / `:101` / `:147` 的步骤名仍沿用旧的
+> `Build core-ui from source`（当前 `build.yml:338-345` 直接调 `cmake -S/-B --build`）；
+> `:117` 的「预置步骤 continue-on-error」与 `:230` 的本地复现命令也已过时
+> （`:62` 是工具链准备、`:116` 是 `GIT_TERMINAL_PROMPT`、`:225` 是 Inno Setup ⏳，均非所指）。
+> 四处属既存文档一致性 backlog，不随第 17 次全绿关闭。
 
 | 环节 | 状态 | 证据 |
 |---|---|---|
 | fork 的基线 CI（commit `4a48349`，`Windows build #1`，9m58s） | ✅ 通过 | **上游基线**，尚未接入 core-ui；不代表当前项目 |
 | checkout / 工具链 / `zsui` 同级检出 | ✅ 已实跑 | run `43673089804` 三个 job 全部通过 |
 | clang-cl + llvm-rc + Ninja + QuickJS-NG 预置 | ✅ 已实跑成功 | 同上 |
-| **core-ui 从源码构建** | ✅ **第 9~15 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
+| **core-ui 从源码构建** | ✅ **第 9~17 次 CI 连续 success** | 日志 3057 行完整落盘；D21 退路已关闭 |
 | `core-ui.dll` 的 x64 断言 / Gate G2 / Gate S7 | ✅ 连续全绿 | run `43673089804` core-ui job step 13/14/15 |
 | **Gate S7' 对 CI 内 DLL 的导出面比对** | ✅ 第 11 次起连续 success | `$env:GITHUB_WORKSPACE` + `Join-Path` 修复经真实 CI 证实 |
 | `Cargo.lock` 与 workspace 一致性 | ✅ 越过 `--locked` | 第 11 次不再报锁文件漂移；第 15 次 `cargo test --locked` 直接通过 |
-| **`cargo test --workspace --release --locked`** | ✅ **第 15 次首次通过（含 doctest 与 13 个单元测试）** | rust job step 8 = `success` |
+| **`cargo test --workspace --release --locked`** | ✅ **第 15 次首次通过（含 doctest 与 13 个单元测试）；第 17 次在 v0.3.12 扩大代码面上再次通过** | rust job step 8 = `success`；具体 passed/ignored 无公开通道，见 §6 |
 | `zsdesk-coreui` 5 个模块文件的编译 | ✅ 第 13 次首次被 rustc 编译、第 15 次全通过 | 类型 / 借用检查结论已由 CI 给出，不再是「未验证」 |
 | Gate S14 / 五个 S13 门禁 | ✅ 第 13 次首次执行、第 15 次全通过 | rust job step 7 / step 9 |
-| `cargo build` / clippy / upload exe | ✅ 第 15 次首次执行并通过 | rust job step 10 / 11 / 12 |
+| `cargo build` / clippy（advisory）/ upload exe | ✅ 第 15 次首次执行并通过、第 17 次仍 `success` | rust job step 10 / 11 / 12；clippy step success ≠ 零告警 |
 | Gate S12 / 收 VC++ x64 CRT / smoke-probe **编译** | ✅ 第 15 次首次执行并通过 | package job step 7 / 8 / 10；`probe.rs` 首次被 rustc 编译 |
 | **`probe.rs` 实际运行（U01~U04，含 `:root` 注入）** | ✅ 第 15 次首次执行、退出码 0 | package job step 11 = `success` |
-| 便携 ZIP / `manifest.sha256` / 上传 | ✅ 第 15 次首次产出 | `ZSDesk-full-x64` 4,941,625 B，`expired: false` |
+| 便携 ZIP / `manifest.sha256` / 上传 | ✅ 第 15 次首次产出；第 17 次再次产出 | 第 15 次 4,941,625 B（历史值）；**第 17 次 5,594,915 B ≈ 5.34 MiB**，四个 artifact 均 `expired: false` |
 | 失败原因的公开可见性（D23） | ✅ 第 10 / 11 / 13 / 14 次已证明有效 | `::error::` annotations 逐轮定位真因；annotation 带 `-Context 0,5` 后可直接拿到 `文件:行:列` |
 | **Package job failure locator 的失败分支** | ⏳ **未实测** | 第 15 次 job 成功 ⇒ 条件步骤 `skipped`；只有将来该 job 真失败时才能验证其 `::error::` 输出，不得写成「已验证」 |
 | **真机渲染 / 32 个句柄 / `:root` 视觉效果** | ⏳ **未验证** | CI 无 GUI 人工观感；`docs/13-UIX-FIRST-RENDER-CHECKLIST.md` 清单尚未执行 |

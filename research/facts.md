@@ -2,6 +2,13 @@
 
 > 只记录**已核实**的事实。来源标注在每节末尾。
 > 本文件不是 PRD，也不是技术 Spec——那两份由 PM / 架构师产出。
+>
+> ⚠️ **文件级基线快照警示（2026-11-15）**：本底稿的 §1、§7.5、§7.8、§7.9 等上游代码量 /
+> 文件数 / 版本 / workspace 成员描述，全部是 **v0.3.11 @ `6aec0c2` 调研时的快照**。
+> 本仓库已同步上游 **v0.3.12 `cb465e8`**（workspace version 现为 `0.3.12`），
+> 上游代码面变为 166 个 `.rs` / 55,420 行，合并后含 fork 的 `zsdesk-coreui` 共 174 个。
+> **取「当前版本」或「workspace 成员」等事实请以 `Cargo.toml` / `Cargo.lock` / `README-FORK.md`
+> 为准，不得把下文的历史快照当成当前事实。** 文件级迁移矩阵见 `spec/migration-matrix.md`。
 
 ---
 
@@ -11,8 +18,8 @@
 |---|---|---|
 | 定位 | Windows 原生多标签文件管理器 + 桌面格子 | 仓库 README |
 | 技术栈 | Rust + Win32/COM + Direct2D + DirectWrite | 仓库 README |
-| 当前版本 | 0.3.11（**v0.3.11 调研时快照**；2026-11-15 已同步上游 v0.3.12 `cb465e8`） | 仓库 README / Cargo.toml |
-| workspace 成员 | `crates/zsdesk-core`、`zsdesk-platform`、`zsdesk-app`、`zsdesk-ui`、`zsdesk-windows` | `Cargo.toml`（raw 实测） |
+| 当前版本 | **0.3.12** | 本仓库 `Cargo.toml` / `Cargo.lock` / `README.md`（**v0.3.11 调研时值为 0.3.11**；2026-11-15 已同步上游 v0.3.12 `cb465e8`） |
+| workspace 成员 | `crates/zsdesk-core`、`zsdesk-platform`、`zsdesk-app`、`zsdesk-ui`、`zsdesk-windows`、**`crates/zsdesk-coreui`**（fork 新增） | `Cargo.toml`（raw 实测；调研时上游仅前 5 个） |
 | Rust 基线 | `edition 2021`，`rust-version = "1.89"`，CI 用 1.99 | `Cargo.toml`（raw 实测） |
 | 共享依赖 | serde / serde_json / tracing / tracing-subscriber / anyhow / dirs | `Cargo.toml`（raw 实测） |
 | release profile | `opt-level = 3`，`lto = "thin"` | `Cargo.toml`（raw 实测） |

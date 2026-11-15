@@ -3,7 +3,7 @@
 > 本文件原记录**代码停止编写时**的未完成事项。
 > 已推送状态见 §1；CI 复验事项（**现已全部关闭**）见 §2；
 > 后续里程碑见 §3；已知的判断与风险见 §4。
-> **当前状态以 §0.7 与 `PROJECT_STATE.md` / `docs/ci.md` §6 为准**；§0.1~§0.6 是逐轮历史快照。
+> **当前状态以 §0.8 与 `PROJECT_STATE.md` / `docs/ci.md` §6 为准**；§0.7 = M0 闭环、§0.1~§0.6 是逐轮历史快照。
 
 ---
 
@@ -27,12 +27,16 @@
   依次推送，并由第 11~15 次 CI 逐层验证。
 - **仍未开始的是 M1 功能装配与真机验收**（见 §3），不是 CI 修复；按用户裁定的
   「主动上传 → 主动按 Action 结果改代码 → 循环到 CI 转绿」，本轮闭环到此结束。
-- **2026-11-15 后续新增任务：同步上游 v0.3.12**。已按用户拍板「完整合并」执行：
+- **2026-11-15 后续新增任务：同步上游 v0.3.12 —— 已收口**。已按用户拍板「完整合并」执行：
   三路成员互查闸门通过（架构 Go / QA Go / 运维补齐前置即 Go）→ `git merge --no-ff upstream/main`
   （2 提交 / 108 文件，`ec7e5d2` + `cb465e8`）→ 唯一冲突 `README.md` 人工裁决 →
-  `Cargo.lock` / `Cargo.toml` 三方自动合并且 tomllib 校验通过 → 六门禁 + S14（145 个 `.rs`）全过。
-  **第 17 次 CI 尚未判读**，上游新增 28 个 `.rs` / +13,270 行首次进入 `cargo test`，
-  编译结论只能由 CI 给出。完整决策与判读口径见 `PROJECT_STATE.md` 与 `DECISIONS.md` 第二十轮。
+  `Cargo.lock` / `Cargo.toml` 三方自动合并且 tomllib 校验通过 → 六门禁 + S14 全过 →
+  主动 push merge commit `aa44acc` → **第 17 次 CI（run `43678206351`）三 job 逐 step 全 `success`**，
+  4 个 artifact 齐全（`ZSDesk-full-x64` **5,594,915 B ≈ 5.34 MiB**，`expired: false`）。
+  上游新增 28 个 `.rs` / +13,270 行首次通过 `cargo test --workspace --release --locked`。
+  性质是「**上游 v0.3.12 同步收口 / M0 回归验证通过**」，**不是** M1 前置达成、功能里程碑或 M0 重新达成。
+  判读细节与口径修正见 **§0.8**、`PROJECT_STATE.md` 与 `DECISIONS.md` 第二十/二十一轮。
+  **本次纯文档回写 push 后会触发第 18 次 CI，须单独判读**，不得并入第 17 次结论。
 
 ---
 
@@ -221,7 +225,7 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 
 | job | 结果 | 结论 |
 |---|---|---|
-| Rust 编译 / 测试 | **success** | Gate S14、**`cargo test --locked` 首次通过（含 doctest 与 13 个单元测试）**、Gate S13、`cargo build`、clippy、上传 exe 全绿 |
+| Rust 编译 / 测试 | **success** | Gate S14、**`cargo test --locked` 首次通过（含 doctest 与 13 个单元测试）**、Gate S13、`cargo build`、上传 exe 全绿；clippy 为 advisory（`continue-on-error`），step `success` ≠ 零告警 |
 | core-ui 源码构建 | **success** | 从源码构建 + x64 断言 + Gate G2 / S7 / **S7'** 连续第七次全绿 |
 | 便携包组装 | **success** | **本 job 首次真正执行**：Gate S12 / 收 VC++ x64 CRT / smoke probe 首次编译 / **真实 DLL + 真实 `.uix` 冒烟通过** / ZIP 打包与上传 |
 
@@ -252,6 +256,40 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 
 ---
 
+## 0.8 第 17 次 CI（run `43678206351`，merge commit `aa44acc`）—— 上游 v0.3.12 同步收口
+
+> **性质**：「上游 v0.3.12 同步收口 / M0 回归验证通过」，是扩大代码面上的回归验证；
+> **不是** M1 前置达成、功能里程碑或 M0 重新达成。§0.7 记录的是 M0 验收闭环，两者是不同里程碑，不要合并。
+
+**判读结论（2026-11-15，主动按 Action 结果闭环）**
+- run `43678206351`，`event=push`、`head_sha=aa44acc`、`head_branch=main`、`run_attempt=1`（无重跑）：`conclusion=success`。
+- 3 个 job（`Rust 编译 / 测试`、`core-ui 源码构建`、`便携包组装`）`conclusion` 全 `success`；逐 step 全 `success`，唯一 `skipped` 是条件步骤「Package job failure locator」（`if: failure()`，job 成功时跳过属预期）。
+- 4 个 artifact 均 `expired: false`：`ZSDesk-full-x64` **5,594,915 B ≈ 5.34 MiB**（未触 10 MB 红线）、`zsdesk-app-full-x64` 3,006,887 B、`core-ui-x64` 1,981,859 B、`core-ui-build-log` 22,420 B。第 15/16 次的 4,941,625 B 是**历史值**。
+- 上游新增 28 个 `.rs` / +13,270 行首次通过 `cargo test --workspace --release --locked`，`--locked` 未漂移。
+
+**annotations 定性（判读只认 conclusion，不认 annotation_level）**
+- 第 15 / 16 / 17 次公开 annotations **逐条完全一致**（core-ui 10 条 `failure` 级文本、Rust 1 条 `Process completed with exit code 1.`、三个 job 各 1 条 Node.js 20 deprecated warning）；前两次已确认全绿 ⇒ 与本次 merge 无关。
+- core-ui 那 10 条来自 `build.yml:361/:372/:384` 的无条件日志探针（正则显式含 `warning`，`errorHits=534` 是 error+warning 总命中）；`build.yml:395` 的 `throw` 保证构建真失败会让 step 失败；`::error::` 不改变退出码。
+- Rust 那条对应 `continue-on-error: true` 的 `Clippy (advisory)`（强推断，公开 annotations 不返回 step 关联）⇒ **clippy 的 step `success` ≠ clippy 零告警**。
+
+**测试面口径（权威 = `.rs` 属性总数）**
+- 合并前 fork `9a3628b` → 合并后 `aa44acc`：`#[test]` **402→527**、`#[ignore` **59→84**；上游 `cb465e8` 单独 512 / 84。旧写法 402→512 / `passed` 343→428 是跨对象 + 混口径，已作废。
+- 14 个 `#[ignore` 写成 `#[test]#[ignore="..."]` 同行（行首正则会漏数）；静态非 ignored 估算 343→443。
+- **runner 的 `passed` / `ignored` / `failed` 具体数字无公开通道**：`test-output.txt` 只由 `build.yml:94` 的 `Tee-Object` 落盘、成功分支不 emit annotation、未收录进任何 artifact，job logs 下载端点需 admin（403）⇒ 一律标「静态估算、未观测」，不得写「CI 实测」或「全部测试通过」。
+- `build.yml:94` 不带 `-- --ignored` ⇒ **84 个 ignored 测试从未执行**（既存质量债，不随本次全绿关闭）。
+- 退出码 0 证明 workspace 编译通过、`#[path]` 目标存在且被编译收集；**不能证明** 527 个静态 `#[test]` 全部被收集，也不能拿 S14 PASS 当证据（S14 对 18 个同行 `#[path]` 声明漏检，`--root .` 递归覆盖 145 个文件 vs 全仓 174）。
+
+**仍属未验证 / 未开始（一条都不关闭）**
+- `Package job failure locator` 的**失败分支**：job 成功 ⇒ 条件步骤 skipped，**未实测**。
+- 真机渲染 / 32 个句柄 / `:root` 视觉：⏳ 未验证，`docs/13` 清单未执行。
+- Inno Setup 安装包编译：⏳ 未验证，未接进 CI。
+- M1 全量业务功能：⏳ 未开始，当前 exe 是 FFI 绑定层 + 冒烟探针骨架。
+- Release 永久分发：⏳ 未开始，仅有 Actions artifact（默认 90 天过期）。
+
+**第 18 次 CI 预登记**：`build.yml:3-6` 的 `on: push` 无分支过滤，本次纯文档回写 push 后必然触发第 18 次 CI，须单独判读，不得并入第 17 次结论。
+
+---
+
 ## 1. 已写入磁盘的改动与静态复核记录
 
 > **口径（2026-11-15 第 15 次 CI 后更新）**：本表是**历史静态复核记录**，
@@ -265,7 +303,7 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 
 | 项 | 文件 | 验证方式 |
 |---|---|---|
-| `:root` 注入模块（形态甲） | `crates/zsdesk-coreui/src/lib/theme.rs` | tree-sitter 语法零错误；文件内有 **13 个 `#[test]`**，但本机无 cargo/rustc，**这些单元测试从未执行过**（无「5 条等价逻辑用例」的落盘证据） |
+| `:root` 注入模块（形态甲） | `crates/zsdesk-coreui/src/lib/theme.rs` | tree-sitter 语法零错误；文件内有 **13 个 `#[test]`**（**写入当时的历史标签**：本机无 cargo/rustc 故当时未执行；**第 15 次 CI 已实际执行并通过**，见 §0.7 与 `PROJECT_STATE.md`） |
 | 注入路径进 CI 探针 | `crates/zsdesk-coreui/examples/probe.rs` | tree-sitter 语法零错误；**未编译**（`page_load_string` 的 NUL 结尾缺陷已于 2026-11-14 静态修正，待 CI 编译验证） |
 | PE 导出表解析器 | `scripts/gates/pe_exports.py` | 用本机 `GuoheView\core-ui.dll` 实测 567 个 `ui_*`，与 `docs/05` **集合一致**；`diff` 因 Python stdout CRLF vs grep/sort LF **返回 1**，故**不是逐字节一致** |
 | 导出面门禁 S7' | `scripts/gates/coreui_export_gate.py` | 正例通过；反例（截断 DLL / 无 `ui_*` 的 kernel32）均正确失败 |
@@ -307,7 +345,7 @@ runner 的 Python 3.11 stdout 默认 `cp1252`，打印中文判定理由就抛�
 | **Gate S14 在 CI 首次执行** | 第 13 次 CI | 第 12 次 `cp1252` 崩溃已由全局 UTF-8 修复；第 13 / 15 次通过 |
 | **Rust 5 个模块文件首次被 rustc 编译** | 第 13 次（首次）/ 第 15 次（全通过） | 暴露的 5 个类型/借用错误已在 `33aca13` 修复 |
 | **`cargo test --workspace --release --locked`** | **第 15 次 CI** | rust job step 8 `success`，含 doctest 与 13 个单元测试 |
-| `cargo build` / clippy / upload exe | 第 15 次 CI | rust job step 10 / 11 / 12 全 `success` |
+| `cargo build` / clippy（advisory）/ upload exe | 第 15 次 CI | rust job step 10 / 11 / 12 全 `success`；clippy step success ≠ 零告警 |
 | **package job 全链路**（Gate S12 / CRT / probe 编译与运行 / ZIP / 上传） | **第 15 次 CI 首次真正执行** | package job 12 步 `success`，第 13 步按条件 `skipped` |
 | `probe.rs` 的 `E0308` | 第 15 次 CI | `63685f9` 的 `.into_owned()` 修复生效，不再报错 |
 
@@ -493,6 +531,6 @@ curl -s "https://api.github.com/repos/tikey1/zsdesk/check-runs/<JOB_ID>/annotati
 3. **作者不得自审** —— 产出需另一方独立复核（本轮 QA 与架构师的双向复核
    实际抓出了 6 个 P1 级问题，全部已修）。
 4. **未验证的东西必须标注** —— 本文件即为该纪律的载体：
-   §0.7 = 当前已验证结论，§1 = 历史静态复核记录，§2 = CI 复验事项（**已全部关闭**），§3 = 未开始。
+   §0.8 = 当前状态，§0.7 = M0 闭环结论，§1 = 历史静态复核记录，§2 = CI 复验事项（**已全部关闭**），§3 = 未开始。
    第 15 次 CI 之后，**M1 功能装配、真机首渲染清单、Inno Setup 安装包编译、Release 分发**
    仍是明确标注的未验证 / 未开始项，见 `PROJECT_STATE.md`「风险」与「下一步」。

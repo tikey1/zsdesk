@@ -6,13 +6,20 @@
 
 > **当前状态（2026-11-15）**：M0 验收闭环已达成 —— **第 15 次 CI**（run `43673089804`，
 > commit `63685f9`）三个 job 全部 `success`；纯文档提交 `9a3628b` 触发的**第 16 次 CI**
-> （run `43674268118`）同样全绿，产物 `ZSDesk-full-x64` 4,941,625 B ≈ 4.71 MiB。
+> （run `43674268118`）同样全绿，产物 `ZSDesk-full-x64` 4,941,625 B ≈ 4.71 MiB（**历史值**）。
+>
+> **上游 v0.3.12 同步收口 / M0 回归验证通过**：`--no-ff` merge 的 merge commit `aa44acc`
+> 已推送，触发的**第 17 次 CI**（run `43678206351`）三个 job 逐 step 全 `success`、
+> 唯一 `skipped` 是条件步骤「Package job failure locator」（job 成功时跳过，属预期），
+> 4 个 artifact 齐全：`ZSDesk-full-x64` **5,594,915 B ≈ 5.34 MiB**（**当前值**，未触 10 MB 红线）、
+> `zsdesk-app-full-x64` 3,006,887 B、`core-ui-x64` 1,981,859 B、`core-ui-build-log` 22,420 B。
+> 这是扩大代码面上的回归验证，**不是** M1 前置达成、功能里程碑或 M0 重新达成。
 > 详见 `PROJECT_STATE.md` 与 `docs/ci.md` §6。
 >
 > **2026-11-15 上游同步**：已用 `--no-ff` merge 合入 `qiu7824/zsdesk` v0.3.12
 > （2 提交 / 108 文件，`ec7e5d2` + `cb465e8`），保留本 fork 重写的 CI、新 crate
-> `crates/zsdesk-coreui/`、`.uix` 资产与全部机械门禁。合并后的 CI 结论见 `PROJECT_STATE.md`；
-> **合并前的全绿基线 `9a3628b` 由本地 tag / 备份分支 `pre-upstream-0.3.12` 固化**。
+> `crates/zsdesk-coreui/`、`.uix` 资产与全部机械门禁。合并前的全绿基线 `9a3628b`
+> 由本地 tag / 备份分支 `pre-upstream-0.3.12` 固化；远端 `origin/main` 现为 `aa44acc`。
 >
 > **已知限制（如实披露）**：
 > ① Rust 侧目前是 FFI 绑定层 + 冒烟探针，**全量业务功能（M1）尚未装配**；
@@ -41,7 +48,7 @@
 ## 上游基线
 
 - 建 fork 时的上游基线：`6aec0c2 Release ZSDesk 0.3.11 fixes`
-- **已同步的上游 HEAD**：`cb465e862b`（v0.3.12，2 提交 / 108 文件，2026-11-15 以 `--no-ff` merge 合入）
+- **已同步的上游 HEAD**：`cb465e862b`（v0.3.12，2 提交 / 108 文件，2026-11-15 以 `--no-ff` merge 合入）；**merge commit `aa44acc` = 本地 `main` = 远端 `origin/main`**，第一父 `9a3628b` 提供远端回滚锚点
 - 合并前全绿锚点：本地 tag / 备份分支 `pre-upstream-0.3.12` = `9a3628b`（第 15 / 16 次 CI 全绿）；合并用 merge 而非 rebase，以保留 `docs/12` 的 `6ea629f` 等历史引用可解析
 - 语言：Rust 为主，少量 C++ / C / PowerShell / C#
 - 许可：MIT，`Copyright (c) 2026 ZSDesk contributors`；上游 `LICENSE` 与 `THIRD-PARTY-NOTICES.txt` 原样保留
